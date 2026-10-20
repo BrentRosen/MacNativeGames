@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Make a RomFS mod that draws keyboard keys or Xbox controller buttons in place of the Switch button icons.
+"""Make a RomFS mod that draws keyboard keys, Xbox or PlayStation controller buttons in place of the Switch button icons.
 
 The A/B/X/Y, L/R, ZL/ZR, +/- and d-pad icons the game shows in its prompts are glyphs of one font,
 scft/External.bfotf in Font/Font.Nin_NX_NVN.bfarc.zs (private-use code points U+E040 to U+E068). This script reads that
@@ -13,6 +13,8 @@ Styles:
             + - = Enter Tab, left stick = W A S D, right stick = arrow keys, stick presses = Z C, d-pad = T F G H.
   xbox      the buttons in the place a controller presses them (controllers follow the Switch's physical layout):
             A B X Y = B A Y X, L R = LB RB, ZL ZR = LT RT, + - = Menu and View, the d-pad as a cross.
+  playstation  the same places: A B X Y = circle, cross, triangle, square, L R = L1 R1, ZL ZR = L2 R2, + - = Options and
+            Create, the d-pad as a cross.
 Prompts drawn as fixed images (some tutorial animations) keep the Switch icons: they are not glyphs of this font.
 
 Format notes (checked on 1.0.0 and 1.2.1): a .bfotf is an OpenType (CFF) font with an 8-byte header, XOR-ed with a
@@ -21,9 +23,9 @@ The archive is a SARC; its members are packed again in their original order and 
 External.bfotf must come out byte-identical. The archive is compressed with the zstd dictionary it used (Pack/ZsDic).
 
 Needs fontTools (python3.14 -m pip install fonttools) and Python 3.14 (compression.zstd). An existing font archive in the mod
-folder (another mod's, or an earlier run) is only overwritten with --replace. The xbox style matches the default face-button
-mapping by position (not TOTK_FACE_BUTTONS=label or face buttons changed in controls.txt).
-usage: make_button_icons.py <mod folder> (--app <Tears of the Kingdom.app> | --romfs <folder>) [--version v121] [--style xbox] [--replace]
+folder (another mod's, or an earlier run) is only overwritten with --replace. The xbox and playstation styles match the
+default face-button mapping by position (not TOTK_FACE_BUTTONS=label or face buttons changed in controls.txt).
+usage: make_button_icons.py <mod folder> (--app <Tears of the Kingdom.app> | --romfs <folder>) [--version v121] [--style xbox|playstation] [--replace]
 """
 import argparse
 import io
@@ -279,14 +281,72 @@ def xbox_style(g):
     }
 
 
-STYLES = {'keyboard': keyboard_style, 'xbox': xbox_style}
+# PlayStation symbols, cut out of a disc of radius r centred at (cx, cy): outlines are a hole (clockwise) with the inside
+# filled again (counter-clockwise), the cross is one clockwise polygon so its two strokes do not cancel where they meet.
+def ps_symbol(pen, symbol, cx, cy, r):
+    reverse = ReverseContourPen(pen); stroke = r * 0.17
+    if symbol == 'circle':
+        circle(reverse, cx, cy, r * 0.52); circle(pen, cx, cy, r * 0.52 - stroke)
+    elif symbol == 'square':
+        s = r * 0.44
+        rounded(reverse, cx - s, cy - s, cx + s, cy + s, r * 0.05); rounded(pen, cx - s + stroke, cy - s + stroke, cx + s - stroke, cy + s - stroke, r * 0.02)
+    elif symbol == 'triangle':
+        h = r * 1.02; top, bottom = cy + h * 0.56, cy - h * 0.44; half = h / 3 ** 0.5
+        outer = [(cx, top), (cx + half, bottom), (cx - half, bottom)]
+        inset = stroke * 2   # the inner triangle's corners move twice the stroke along the bisectors
+        inner = [(cx, top - inset), (cx + half - inset * 3 ** 0.5 / 2, bottom + stroke), (cx - half + inset * 3 ** 0.5 / 2, bottom + stroke)]
+        polygon(pen, outer)                      # clockwise in y-up: a hole
+        polygon(reverse, inner)                  # reversed to counter-clockwise: filled
+    elif symbol == 'cross':
+        a, w = r * 0.50, stroke * 0.75           # arm reach and half-width of each stroke
+        pts = [(cx, cy + w * 1.414), (cx + a - w, cy + a + w), (cx + a + w, cy + a - w), (cx + w * 1.414, cy),
+               (cx + a + w, cy - a + w), (cx + a - w, cy - a - w), (cx, cy - w * 1.414), (cx - a + w, cy - a - w),
+               (cx - a - w, cy - a + w), (cx - w * 1.414, cy), (cx - a - w, cy + a - w), (cx - a + w, cy + a + w)]
+        polygon(pen, pts)                        # clockwise: a hole
 
+
+def playstation_style(g):
+    def face(symbol, advance=640):
+        def draw(pen):
+            circle(pen, advance / 2, CY, R); ps_symbol(pen, symbol, advance / 2, CY, R)
+        return advance, draw
+    def bumper(label, advance=820):
+        def draw(pen):
+            rounded(pen, 40, Y0 + 70, advance - 40, Y1 - 70, 70, 150); g.hole(pen, label, advance / 2, CY, 230, advance - 200)
+        return advance, draw
+    def trigger(label, advance=760):
+        def draw(pen):
+            rounded(pen, 60, Y0, advance - 60, Y1, 60, 230); g.hole(pen, label, advance / 2, CY - 20, 230, advance - 220)
+        return advance, draw
+    def options(advance=640):   # Options: a pill with three bars
+        def draw(pen):
+            rounded(pen, 60, CY - 200, advance - 60, CY + 200, 200); reverse = ReverseContourPen(pen)
+            for dy in (-95, 0, 95):
+                rounded(reverse, advance / 2 - 130, CY + dy - 30, advance / 2 + 130, CY + dy + 30, 30)
+        return advance, draw
+    def create(advance=640):    # Create: a pill with three short strokes rising from a base line
+        def draw(pen):
+            rounded(pen, 60, CY - 200, advance - 60, CY + 200, 200); reverse = ReverseContourPen(pen)
+            rounded(reverse, advance / 2 - 130, CY - 120, advance / 2 + 130, CY - 64, 28)
+            for dx in (-90, 0, 90):
+                rounded(reverse, advance / 2 + dx - 26, CY - 30, advance / 2 + dx + 26, CY + 120, 26)
+        return advance, draw
+    dpad = xbox_style(g)
+    return {
+        0xE040: face('circle'), 0xE041: face('cross'), 0xE042: face('triangle'), 0xE043: face('square'),
+        0xE044: bumper('L1'), 0xE045: bumper('R1'), 0xE046: trigger('L2'), 0xE047: trigger('R2'),
+        0xE04B: options(), 0xE04C: create(),
+        **{cp: dpad[cp] for cp in (0xE049, 0xE060, 0xE061, 0xE062, 0xE063, 0xE064, 0xE065)},
+    }
+
+
+STYLES = {'keyboard': keyboard_style, 'xbox': xbox_style, 'playstation': playstation_style}
 
 def redraw(otf, text_fonts, style):
     font = TTFont(io.BytesIO(otf))
+    icons = STYLES[style](Glyphs(text_fonts))
     cff = font['CFF '].cff; top = cff.topDictIndex[0]; charstrings = top.CharStrings; private = top.Private
     nominal = getattr(private, 'nominalWidthX', 0); cmap = font.getBestCmap()
-    icons = STYLES[style](Glyphs(text_fonts))
     for cp, (advance, draw) in icons.items():
         pen = T2CharStringPen(advance - nominal, None); draw(pen)
         charstrings[cmap[cp]] = pen.getCharString(private=private, globalSubrs=cff.GlobalSubrs)
@@ -297,6 +357,25 @@ def redraw(otf, text_fonts, style):
         font['hmtx'][cmap[cp]] = (advance, int(round(box.bounds[0])))
     out = io.BytesIO(); font.save(out)
     return out.getvalue(), len(icons)
+
+
+def font_archive(read, dictionaries, style):
+    """The compressed font archive (Font/Font.Nin_NX_NVN.bfarc.zs) with the style's icons drawn in External.bfotf.
+    read(path) returns a RomFS file; dictionaries maps zstd dictionary IDs to Pack/ZsDic's dictionaries."""
+    raw = read(ARCHIVE)
+    info = zstd.get_frame_info(raw); dictionary = dictionaries[info.dictionary_id]
+    archive = zstd.decompress(raw, zstd_dict=dictionary); assert len(archive) == info.decompressed_size
+    members = sarc_members(archive)
+    otf, key = bfotf_decode(archive[slice(*members[FONT])])
+    assert otf[:4] == b'OTTO', 'External.bfotf did not decode to an OpenType font'
+    text_fonts = [TTFont(io.BytesIO(bfotf_decode(archive[slice(*members[name])])[0])) for name in TEXT_FONTS]
+    new_otf, count = redraw(otf, text_fonts, style)
+    new_blob = bfotf_encode(new_otf, key); assert bfotf_decode(new_blob)[0] == new_otf
+    new_archive = repack(archive, FONT, new_blob)
+    data = zstd.compress(new_archive, level=19, zstd_dict=dictionary)
+    assert zstd.decompress(data, zstd_dict=dictionary) == new_archive
+    assert zstd.get_frame_info(data).dictionary_id == info.dictionary_id
+    return data, count, len(new_archive)
 
 
 def main():
@@ -330,19 +409,7 @@ def main():
         pack = zstd.decompress(read('Pack/ZsDic.pack.zs'))
         for lo, hi in sarc_members(pack).values():
             d = zstd.ZstdDict(pack[lo:hi]); dictionaries[d.dict_id] = d
-        raw = read(ARCHIVE)
-    info = zstd.get_frame_info(raw); dictionary = dictionaries[info.dictionary_id]
-    archive = zstd.decompress(raw, zstd_dict=dictionary); assert len(archive) == info.decompressed_size
-    members = sarc_members(archive)
-    otf, key = bfotf_decode(archive[slice(*members[FONT])])
-    assert otf[:4] == b'OTTO', 'External.bfotf did not decode to an OpenType font'
-    text_fonts = [TTFont(io.BytesIO(bfotf_decode(archive[slice(*members[name])])[0])) for name in TEXT_FONTS]
-    new_otf, count = redraw(otf, text_fonts, args.style)
-    new_blob = bfotf_encode(new_otf, key); assert bfotf_decode(new_blob)[0] == new_otf
-    new_archive = repack(archive, FONT, new_blob)
-    data = zstd.compress(new_archive, level=19, zstd_dict=dictionary)
-    assert zstd.decompress(data, zstd_dict=dictionary) == new_archive
-    assert zstd.get_frame_info(data).dictionary_id == info.dictionary_id
+        data, count, _ = font_archive(read, dictionaries, args.style)
 
     target = args.mod / ARCHIVE; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(data)
     print(f'{target}: {count} icons redrawn ({args.style}), {len(data)} bytes')

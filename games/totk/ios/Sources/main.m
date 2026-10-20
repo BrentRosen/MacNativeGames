@@ -120,6 +120,7 @@ static void audio_observe(void) {
     setenv("TOTK_OPERATION_MODE","handheld",1);
     setenv("TOTK_ROMFS_PATCHES",[res stringByAppendingPathComponent:@"romfs-patches"].fileSystemRepresentation,1);
     setenv("TOTK_ROMFS_PATCHES_OUT",[res stringByAppendingPathComponent:@"romfs-patches-out"].fileSystemRepresentation,1);
+    setenv("TOTK_ROMFS_CONTROLS",[res stringByAppendingPathComponent:@"romfs-controls"].fileSystemRepresentation,1);
     setenv("TOTK_SHARED_FONTS",[res stringByAppendingPathComponent:@"shared-fonts"].fileSystemRepresentation,1);
     setenv("TOTK_SHADER_SEED_DIR",[res stringByAppendingPathComponent:@"shader-seed"].fileSystemRepresentation,1);
     /* One folder per translation chain, as on the Mac: the runtime refuses translations of another chain, and the seed

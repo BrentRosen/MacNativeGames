@@ -46,8 +46,9 @@ static uint64_t handles[NH]; /* file index + 1; 0 is free */
    path, the overlay's size and SHA-256 and the original's SHA-256; a missing path, a size or hash mismatch or a changed
    original stops the start. The directories, in this order: the build's patches (scripts/make_romfs_patches.py;
    TOTK_ROMFS_PATCHES, default extracted/<version>/romfs-patches, 0 = none), the true-2K HeapDef overlay
-   (scripts/make_output_res_overlay.py) and the player's mods (TOTK_ROMFS_MODS, which the launcher sets to
-   <data>/mods/<version>; no manifest there = none). Each file can be replaced once. An overlay file is opened when the
+   (scripts/make_output_res_overlay.py), the Options menu's Button icons row (controls_init) and the player's mods
+   (TOTK_ROMFS_MODS, which the launcher sets to <data>/mods/<version>; no manifest there = none). Each file can be
+   replaced once. An overlay file is opened when the
    game opens it, so a mod can replace thousands of files (a dub's voice streams) without holding a descriptor each; the
    file's identity (device, inode, size, modification time) is kept from the start check, and an open that finds another
    file there stops the game instead of serving bytes nobody checked. scripts/make_mod_manifest.py writes a mod's manifest.
@@ -212,9 +213,44 @@ static int folder_exists(const char *folder) {
 }
 /* The overlay slot + 1 that replaces RomFS file i, or 0. */
 static uint32_t overlay_slot(uint64_t i) {size_t lo=0,hi=noverlay;while(lo<hi){size_t m=lo+(hi-lo)/2;if(overlays[m].index<i)lo=m+1;else hi=m;}return lo<noverlay&&overlays[lo].index==i?(uint32_t)(lo+1):0;}
+/* 1 when the manifests of overlay folders a and b name a common RomFS path (a missing manifest names none). */
+static int manifests_overlap(const char *a,const char *b) {
+ char path[4200],line[8192],name[4096];int found=0;snprintf(path,sizeof(path),"%s/manifest.tsv",a);FILE *fa=fopen(path,"r");if(!fa)return 0;
+ snprintf(path,sizeof(path),"%s/manifest.tsv",b);FILE *fb=fopen(path,"r");
+ if(fb)while(!found&&fgets(line,sizeof(line),fa)){
+  if(line[0]=='#'||sscanf(line,"%4095[^\t]",name)!=1)continue;rewind(fb);char other[8192];size_t n=strlen(name);
+  while(!found&&fgets(other,sizeof(other),fb))found=other[0]!='#'&&!strncmp(other,name,n)&&other[n]=='\t';}
+ fclose(fa);if(fb)fclose(fb);return found;
+}
+/* The Options menu's Button icons row (scripts/make_controls_option.py): TOTK_ROMFS_CONTROLS (default
+   extracted/<version>/romfs-controls, 0 = none) holds menu/ (the row, its text and its saved value) and
+   icons-<xbox|playstation>/ (the button-icon font; Switch is the game's own). The game loads that font once, so the
+   style is read here from the row's value in option.sav: the Enum OptionData.IsControlStickUpDownReverse (murmur3
+   0xce2cee8e), whose values are the murmur3 hashes of the ChoiceType names Normal, Pro and Dark. option.sav is the
+   header (magic 0x01020304, the data offset at +8) and (hash, value) pairs from +0x20 up to that offset. No save yet,
+   or no value: Switch. */
+static const char *controls_style(void) {
+ const char *profile=getenv("TOTK_PROFILE_DIR");if(!profile)profile="user-data";uint64_t uid[2];runtime_account_uid(uid);
+ char path[4200];snprintf(path,sizeof(path),"%s/save/%016llx%016llx/option.sav",profile,(unsigned long long)uid[1],(unsigned long long)uid[0]);
+ static uint8_t sav[65536];int fd=open(path,O_RDONLY|O_CLOEXEC);if(fd<0)return "switch";ssize_t n=read(fd,sav,sizeof(sav));close(fd);
+ uint32_t magic,end;if(n<0x20)return "switch";memcpy(&magic,sav,4);memcpy(&end,sav+8,4);if(magic!=0x01020304u||end>(uint32_t)n)return "switch";
+ for(uint32_t o=0x20;o+8<=end;o+=8){uint32_t h,v;memcpy(&h,sav+o,4);memcpy(&v,sav+o+4,4);if(h!=0xce2cee8eu)continue;
+  return v==0xd4b93848u?"xbox":v==0xf106eb35u?"playstation":"switch";}
+ return "switch";
+}
+static void controls_init(const char *mods) {
+ const char *dir=getenv("TOTK_ROMFS_CONTROLS");if(dir&&!strcmp(dir,"0"))return;if(!dir)dir="extracted/" TOTK_GAME_DIR "/romfs-controls";
+ char menu[4200],icons[4200],m[4300];const char *style=controls_style();
+ snprintf(menu,sizeof(menu),"%s/menu",dir);snprintf(icons,sizeof(icons),"%s/icons-%s",dir,style);snprintf(m,sizeof(m),"%s/manifest.tsv",menu);
+ if(access(m,R_OK)){fprintf(stderr,"[totk] Button icons row: none (%s)\n",m);return;}
+ if(mods&&*mods&&strcmp(mods,"0")&&(manifests_overlap(menu,mods)||manifests_overlap(icons,mods))){
+  fprintf(stderr,"[totk] Button icons row: off, because the mods in %s replace some of its files (options table, GameData list, messages, size table or button font)\n",mods);return;}
+ overlay_load(menu,0);if(strcmp(style,"switch"))overlay_load(icons,0);fprintf(stderr,"[totk] Button icons row: %s icons\n",style);
+}
 /* TOTK_ROMFS_PATCHES (default extracted/<version>/romfs-patches; 0 = none); with a true-2K output bigger than 1920x1080
    also <TOTK_ROMFS_PATCHES_OUT, default extracted/<version>/romfs-patches-out>/<w>x<h> (the HeapDef sizes,
-   scripts/make_output_res_overlay.py); then the player's mods in TOTK_ROMFS_MODS (0 = none). */
+   scripts/make_output_res_overlay.py); the Button icons row (controls_init); then the player's mods in TOTK_ROMFS_MODS
+   (0 = none). */
 static void overlay_init(void) {
  const char *dir=getenv("TOTK_ROMFS_PATCHES");if(!dir||strcmp(dir,"0"))overlay_load(dir?dir:"extracted/" TOTK_GAME_DIR "/romfs-patches",0);
  /* A scene bigger than 1600x900 (TOTK_RENDER_RES, 1.4.3) grows the same heaps: its overlay is <w>x<h>-scene-<sw>x<sh>. */
@@ -226,7 +262,7 @@ static void overlay_init(void) {
   if(access(m,R_OK)){fprintf(stderr,"[totk] RomFS overlay %s missing: make it with\n  .venv/bin/python scripts/make_output_res_overlay.py %ux%u%s%s --version " TOTK_GAME_DIR "%s%s\n",d,w,h,*scene?" --scene ":"",*scene?scene+7:"",out?" --output-root ":"",out?out:"");
    runtime_fail("HeapDef overlay for this output / scene size missing (see the line above)");}
   overlay_load(d,1);}
- const char *mods=getenv("TOTK_ROMFS_MODS");if(mods&&*mods&&strcmp(mods,"0"))overlay_load(mods,0);
+ const char *mods=getenv("TOTK_ROMFS_MODS");controls_init(mods);if(mods&&*mods&&strcmp(mods,"0"))overlay_load(mods,0);
  added_init();
  if(noverlay)qsort(overlays,noverlay,sizeof(*overlays),overlay_order);
  for(size_t k=1;k<noverlay;k++)if(overlays[k].index==overlays[k-1].index){
