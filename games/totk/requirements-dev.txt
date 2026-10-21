@@ -3,3 +3,7 @@
 unicorn==2.1.4
 Pillow==12.3.0
 brotli==1.2.0
+
+# Optional player button-icon mod generators and their format tests.
+fonttools==4.67.0
+Pillow==12.3.0

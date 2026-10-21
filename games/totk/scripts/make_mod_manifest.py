@@ -36,7 +36,7 @@ import struct
 import sys
 
 VERSIONS = ('v0', 'v112', 'v121', 'v143')
-APP_VERSIONS = VERSIONS + ('botw160',)   # the folders an app's RomFS can sit in (VERSIONS: Tears of the Kingdom only)
+APP_VERSIONS = VERSIONS + ('botw160', 'botw190')   # the folders an app's RomFS can sit in (VERSIONS: Tears of the Kingdom only)
 CHUNK = 8 << 20
 # Windows/macOS droppings that mod managers (TKMM, Ryujinx output folders) leave in a RomFS tree: never a game file.
 JUNK = {'desktop.ini', 'thumbs.db', '.ds_store'}
@@ -319,7 +319,7 @@ def main():
     romfs = args.romfs
     if args.app:
         if not version:
-            parser.error('name the game version with --version (or name the mod folder v0, v112, v121, v143 or botw160)')
+            parser.error('name the game version with --version (or name the mod folder v0, v112, v121, v143, botw160 or botw190)')
         romfs = args.app/f'Contents/Resources/totk/extracted/{version}/romfs'
     for need in ('romfs.bin', 'runtime-index.bin'):
         if not (romfs/need).is_file():

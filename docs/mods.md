@@ -24,6 +24,9 @@ The launcher points `TOTK_ROMFS_MODS` at
 where `<version>` is the game version the app was built from: `v0` (1.0.0), `v112` (1.1.2), `v121`
 (1.2.1) or `v143` (1.4.3).
 
+BotW Xbox, PlayStation and keyboard button prompts can be generated with the
+[BotW button-icon tool](botw-button-icons.md).
+
 ### What `manifest.tsv` is
 
 Only the files listed in `manifest.tsv` are served. Each line has four tab-separated fields:
