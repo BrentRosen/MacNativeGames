@@ -18,7 +18,7 @@ def textures():
     for i,(name,w,h,size) in enumerate((('Nt_NNillust_00^f',576,288,442368),('Nt_NNillust_01^f',576,100,147456),('Unrelated',16,16,4096))):
         p=512+i*160;struct.pack_into('<Q',b,128+8*i,p);b[p:p+4]=b'BRTI'
         struct.pack_into('<I',b,p+28,0x901);struct.pack_into('<5I',b,p+36,w,h,1,1,4)
-        struct.pack_into('<I',b,p+80,size);n=1100+i*64;struct.pack_into('<Q',b,p+96,n)
+        struct.pack_into('<I',b,p+88,0x03020202);struct.pack_into('<I',b,p+80,size);n=1100+i*64;struct.pack_into('<Q',b,p+96,n)
         struct.pack_into('<H',b,n,len(name));b[n+2:n+3+len(name)]=name.encode()+b'\0'
         ptr=1400+i*8;struct.pack_into('<Q',b,p+112,ptr);struct.pack_into('<Q',b,ptr,len(b))
         lo=len(b);b.extend(b'\xa5'*size);regions.append((p,lo,len(b),name))
@@ -62,18 +62,22 @@ class BotwControllerPictures(unittest.TestCase):
             out=art.replace_textures(source,style);restored=bytearray(out)
             for p,lo,hi,name in regions:
                 if name=='Unrelated':self.assertEqual(out[lo:hi],source[lo:hi]);continue
-                self.assertEqual(struct.unpack_from('<I',out,p+28)[0],0x1c01)
-                restored[lo:hi]=source[lo:hi];restored[p+28:p+32]=source[p+28:p+32]
-                restored[p+52:p+56]=source[p+52:p+56]
-                self.assertEqual(struct.unpack_from('<I',out,p+88)[0],0x05040302)
-                restored[p+88:p+92]=source[p+88:p+92]
-                w,h,_,_,tile=struct.unpack_from('<5I',out,p+36);row=w//4*16
-                raw=b''.join(out[lo+art.block_offset(x*16,y,row,tile&7):lo+art.block_offset(x*16,y,row,tile&7)+16]
-                             for y in range((h+3)//4) for x in range(w//4))
-                image=Image.frombytes('RGBA',(w,h),raw,'bcn',3)
-                self.assertEqual(image.getpixel((0,0))[3],0)
-                if h==100 and style=='keyboard':self.assertIsNone(image.getbbox())
-                else:self.assertIsNotNone(image.getbbox())
+                # Only pixel storage may change: the game's format, component mapping,
+                # tiling and every BRTI header byte must remain exactly original.
+                self.assertEqual(out[p:p+160],source[p:p+160])
+                restored[lo:hi]=source[lo:hi]
+                w,h,_,_,tile=struct.unpack_from('<5I',out,p+36);row=w*2
+                raw=b''.join(out[lo+art.block_offset(x*2,y,row,tile&7):lo+art.block_offset(x*2,y,row,tile&7)+2]
+                             for y in range(h) for x in range(w))
+                expected=art.drawing(style).resize((w,h),Image.Resampling.LANCZOS) if h==288 else (
+                    Image.new('RGBA',(w,h)) if style=='keyboard' else art.shoulder(style))
+                expected=Image.merge('LA',(expected.convert('L'),expected.getchannel('A')))
+                self.assertEqual(raw,expected.tobytes())
+                self.assertEqual(raw[1],0)
+                if h==100 and style!='keyboard':
+                    # Check the Focus/left-trigger area is opaque and crosses GOB boundaries intact.
+                    for x,y in ((174,22),(174,40),(142,66),(406,22)):
+                        self.assertEqual(raw[(y*w+x)*2+1],255)
             self.assertEqual(bytes(restored),source)
 
     def test_unknown_texture_geometry_refused(self):

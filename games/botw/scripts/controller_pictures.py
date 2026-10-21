@@ -1,5 +1,4 @@
 """BotW controller textures and native blue callouts, generated from the player's Bootup.pack."""
-import io
 import struct
 import sys
 import zlib
@@ -83,18 +82,17 @@ def replace_textures(data,style):
         assert struct.unpack_from('<I',data,at+28)[0]==0x901 and (w,h) in ((576,288),(576,100)) and depth==layers==1
         im=drawing(style).resize((w,h),Image.Resampling.LANCZOS) if h==288 else (
             Image.new('RGBA',(w,h)) if style=='keyboard' else shoulder(style))
-        stream=io.BytesIO();im.save(stream,format='DDS',pixel_format='DXT5');dds=stream.getvalue();assert dds[84:88]==b'DXT5'
-        if h==100:
-            tile=(tile&~7)|3
-            struct.pack_into('<I',out,at+52,tile)
-        blocks=dds[128:];body=bytearray(size);row=(w+3)//4*16
-        for y in range((h+3)//4):
-            for x in range((w+3)//4):
-                off=block_offset(x*16,y,row,tile&7);linear=(y*((w+3)//4)+x)*16
-                assert off+16<=size;body[off:off+16]=blocks[linear:linear+16]
+        # BotW's illustrations use R8G8 with RRRG component mapping: grayscale in R,
+        # alpha in G. Preserve the original format and tile geometry; changing them
+        # to BC3 breaks the short shoulder texture when the game creates its view.
+        assert struct.unpack_from('<I',data,at+88)[0]==0x03020202
+        pixels=Image.merge('LA',(im.convert('L'),im.getchannel('A'))).tobytes()
+        body=bytearray(size);row=w*2
+        for y in range(h):
+            for x in range(w):
+                off=block_offset(x*2,y,row,tile&7);linear=(y*w+x)*2
+                assert off+2<=size;body[off:off+2]=pixels[linear:linear+2]
         assert start+size<=len(data);out[start:start+size]=body
-        struct.pack_into('<I',out,at+28,0x1c01)
-        struct.pack_into('<I',out,at+88,0x05040302)   # RGBA instead of BotW's grayscale+alpha RRRG channels
         found.add(name)
     assert len(found)==2
     return bytes(out)

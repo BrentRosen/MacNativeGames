@@ -52,12 +52,12 @@ it is larger on disk than Nintendo's compressed output, while its decoded size s
 binds each replacement to the original archive's SHA-256.
 
 Controls artwork replaces only two textures in `Layout/Common.sblarc` inside `Pack/Bootup.pack`. The allocated
-texture storage and decoded Common archive size stay unchanged. The layout and its animations place the native
+texture storage, grayscale/alpha format, component mapping, tiling and decoded Common archive size stay unchanged. The layout and its animations place the native
 callouts at the drawn controls while preserving localized text and action visibility. Common is recompressed with
 LZ77; the outer pack can grow slightly. Generation refuses a game whose resource table gives Bootup.pack a fixed
 size budget. Other pack members remain byte-identical.
 
-Synthetic tests cover Yaz0 roundtrips, BC4/BC3 decoding, controller storage, callout endpoints, unchanged font metadata and non-target glyph pixels, and refusal
+Synthetic tests cover Yaz0 roundtrips, BC4 decoding, grayscale/alpha picture encoding, controller storage, callout endpoints, unchanged font metadata and non-target glyph pixels, and refusal
 of unfamiliar geometry. Native AppKit tests exercise all five choices, checkmarks, profile persistence, invalid-choice
 fallback, and delayed controller discovery. Build tests check generation of all three styles for both game versions. Generation was also checked against the player's 1.9.0 fonts for all three styles. Xbox
 prompts were checked in-game on Mac 1.9.0 using a private copy of the save. BotW 1.6.0 and non-English gameplay were
