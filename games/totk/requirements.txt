@@ -4,3 +4,4 @@ lz4==4.4.5             # the code modules (NSO segments)
 capstone==5.0.9        # the code rewriter's disassembler
 nsz==5.0.0             # decompress update containers before NCA extraction
 fonttools==4.67.0      # the button-icon font of the Options menu's Button icons row (scripts/make_controls_option.py)
+Pillow==12.3.0         # procedural Controls-screen controller drawings

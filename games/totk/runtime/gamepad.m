@@ -51,6 +51,19 @@ static int32_t stronger_axis(int32_t a, int32_t b) {
     return abs(b) > abs(a) ? b : a;
 }
 
+/* Queried once when RomFS overlays initialize; hot-plugging takes effect at the next launch, like manual styles. */
+const char *runtime_gamepad_icon_style(void) {
+    @autoreleasepool {
+        for (GCController *controller in GCController.controllers) {
+            if (!controller.extendedGamepad) continue;
+            if ([controller.extendedGamepad isKindOfClass:GCDualSenseGamepad.class] ||
+                [controller.extendedGamepad isKindOfClass:GCDualShockGamepad.class]) return "playstation";
+            return gamepad_icon_style(controller.productCategory.UTF8String, controller.vendorName.UTF8String);
+        }
+        return "keyboard";
+    }
+}
+
 static int face_by_position(GCController *controller) {
     return gamepad_face_by_position(controller.productCategory.UTF8String, controller.vendorName.UTF8String);
 }

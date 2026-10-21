@@ -23,6 +23,20 @@ static inline int gamepad_names_nintendo(const char *text) {   /* case-insensiti
     return 0;
 }
 
+/* Automatic artwork uses the first extended controller at launch. Unknown/MFi pads use Xbox labels. */
+static inline const char *gamepad_icon_style(const char *category, const char *vendor) {
+    if (gamepad_names_nintendo(category) || gamepad_names_nintendo(vendor)) return "switch";
+    const char *names[] = {category, vendor};
+    for (size_t i = 0; i < 2; i++) {
+        if (!names[i]) continue;
+        char lower[256]; size_t n = 0;
+        for (; names[i][n] && n < sizeof lower - 1; n++) lower[n] = (char)tolower((unsigned char)names[i][n]);
+        lower[n] = 0;
+        if (strstr(lower, "dualsense") || strstr(lower, "dualshock") || strstr(lower, "playstation")) return "playstation";
+    }
+    return "xbox";
+}
+
 /* 1: map this controller's face buttons by position. category / vendor: GCController productCategory / vendorName. */
 static inline int gamepad_face_by_position(const char *category, const char *vendor) {
     const char *e = getenv("TOTK_FACE_BUTTONS");

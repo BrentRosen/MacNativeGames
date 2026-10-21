@@ -57,7 +57,7 @@ class Hashes(unittest.TestCase):
         self.assertEqual(co.murmur3('OptionData'), 0x834d9d9e)
         self.assertEqual(co.murmur3('OptionData.DisplayMode'), 0x4e767f10)
         self.assertEqual(co.murmur3('OptionData.IsCameraUpDownReverse'), 0x520ddc44)
-        self.assertEqual([co.murmur3(c) for c in co.CHOICES], [0x390b012d, 0xd4b93848, 0xf106eb35])
+        self.assertEqual([co.murmur3(c) for c in co.CHOICES[:3]], [0x390b012d, 0xd4b93848, 0xf106eb35])
         self.assertEqual(co.murmur3(f'OptionData.{co.OPTION_TYPE}'), 0xce2cee8e)   # what runtime/romfs.c looks for
 
 
@@ -99,7 +99,7 @@ class Messages(unittest.TestCase):
         co.add_option_text(m, 'en')
         again = nx.Msbt(m.bytes())
         self.assertEqual(again.text('1006').decode('utf-16-le'), 'Button icons')
-        self.assertEqual([again.text(f'1006_{i:02d}').decode('utf-16-le') for i in range(3)], list(co.CHOICE_NAMES))
+        self.assertEqual([again.text(f'1006_{i:02d}').decode('utf-16-le') for i in range(len(co.CHOICES))], list(co.CHOICE_NAMES))
         self.assertIn('1006', again.slot_order[nx._msbt_hash('1006', again.slots)])
         with self.assertRaises(AssertionError):
             co.add_option_text(again, 'en')
@@ -107,7 +107,11 @@ class Messages(unittest.TestCase):
     def test_every_language_archive_has_text(self):
         regions = 'CNzh EUde EUen EUes EUfr EUit EUnl EUru JPja KRko TWzh USen USes USfr USpt'.split()
         for region in regions:
-            self.assertIn(co.LANGUAGE.get(region, region[2:]), co.TEXT, region)
+            language = co.LANGUAGE.get(region, region[2:])
+            self.assertIn(language, co.TEXT, region)
+            m = co.add_option_text(nx.Msbt(msbt({'1005': 'Jump', '0005': 'Assign jump.'})), language)
+            self.assertEqual(tuple(m.text(f'1006_{i:02d}').decode('utf-16-le') for i in (3,4)),
+                             co.LOCAL_CHOICES.get(language, co.CHOICE_NAMES[3:]))
 
 
 class OptionTable(unittest.TestCase):
@@ -131,6 +135,7 @@ class GameData(unittest.TestCase):
         self.assertEqual(meta['AllDataSaveOffset'], before['AllDataSaveOffset'] + 8)
         self.assertEqual(meta['AllDataSaveSize'], before['AllDataSaveSize'] + 8)
         enum = data['Data']['Enum'][-1]
+        self.assertEqual(enum['DefaultValue'], co.murmur3('Fast'))
         self.assertEqual(enum['Hash'], 0xce2cee8e); self.assertEqual(enum['RawValues'], list(co.CHOICES))
         self.assertEqual(data['Data']['Struct'][0]['DefaultValue'][-1], {'Hash': co.murmur3(co.OPTION_TYPE), 'Value': 0xce2cee8e})
         # the edited list survives a BYML round trip with its types

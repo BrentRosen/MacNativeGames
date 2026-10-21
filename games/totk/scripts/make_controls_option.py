@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add a "Button icons" row (Switch / Xbox / PlayStation) to the game's own System > Options menu, from the player's RomFS.
+"""Add a "Button icons" row (Switch / Xbox / PlayStation / Keyboard / Automatic) to the game's own System > Options menu, from the player's RomFS.
 
 How the options menu works (Tears of the Kingdom 1.4.3; see docs/controls-option.md):
 - Its rows are data: UI/OptionSetTable/OptionSetTable.game__ui__OptionSetTable.bgyml in Pack/Bootup.Nin_NX_NVN.pack lists
@@ -11,20 +11,21 @@ How the options menu works (Tears of the Kingdom 1.4.3; see docs/controls-option
   0006), the choices 10NN_VV in table order.
 - A row's value is the GameData struct OptionData's member named after the OptionType; the screen reads and writes it
   through the struct (murmur3 of "OptionData", then of the member name). Selection values are Enum entries whose values
-  are murmur3 hashes of ChoiceType names, so the choices reuse three existing ChoiceType names (Normal, Pro, Dark) as
-  Switch, Xbox and PlayStation. GameData/GameDataList gets the struct member and the Enum (SaveFileIndex 1: option.sav).
+  are murmur3 hashes of ChoiceType names, so the choices reuse existing ChoiceType names (Normal, Pro, Dark, Slow, Fast) as
+  Switch, Xbox, PlayStation, Keyboard and Automatic (the default). GameData/GameDataList gets the struct member and the Enum (SaveFileIndex 1: option.sav).
 - option.sav is read by hash: an entry the list lacks is skipped and a missing one keeps its default, so saves load
   both with and without this row. Its stored size and the offsets in the list's MetaData grow by one 8-byte entry; the
   size model is checked against the original numbers first.
-- The game reads its button icons from Font/Font.Nin_NX_NVN.bfarc once at start. An archive is written for the Xbox and
-  the PlayStation style (scripts/make_button_icons.py); the runtime serves the one option.sav selects (none for Switch),
+- The game reads its button icons from Font/Font.Nin_NX_NVN.bfarc once at start. An archive is written for the Xbox, Keyboard and
+  PlayStation styles (scripts/make_button_icons.py); the runtime serves the one option.sav selects (none for Switch),
   so a change shows from the next start.
 - System/Resource/ResourceSizeTable gets the new sizes of the files this changes (each keeps its original allowance
   above the file size), so the game sizes their buffers for them.
 
 Output (each folder with a manifest.tsv that runtime/romfs.c checks at start):
   <output>/menu                    the option table, GameData list, size table and the messages of every language
-  <output>/icons-<xbox|playstation>  the font archive
+  <output>/icons-<xbox|playstation|keyboard>  the font archive
+  <output>/pictures-<style>[-patched]        the Controls picture archive and source fingerprint
 
 usage: make_controls_option.py --output <folder> (--app <Tears of the Kingdom.app> --version v143 | --romfs <folder>)
 """
@@ -44,14 +45,15 @@ except ImportError:
 from make_mod_manifest import VERSIONS, read_index
 from nx_formats import (Int, Msbt, UInt, UInt64, byml_equal, byml_read, byml_write, sarc_members, sarc_replace)
 import make_button_icons as icons
+import controller_pictures
 
 OPTION_PACK = 'Pack/Bootup.Nin_NX_NVN.pack.zs'
 OPTION_TABLE = 'UI/OptionSetTable/OptionSetTable.game__ui__OptionSetTable.bgyml'
 MESSAGES = 'LayoutMsg/SystemOption_00.msbt'
 OPTION_TYPE = 'IsControlStickUpDownReverse'   # OptionType 7: text 1006 / 0006
 AFTER = 'IsChangeJumpButton'                  # the row goes below "Swap jump controls", with the other controls
-CHOICES = ('Normal', 'Pro', 'Dark')           # ChoiceType names standing for Switch, Xbox, PlayStation
-STYLES = ('xbox', 'playstation')                # Switch is the game's own font
+CHOICES = ('Normal', 'Pro', 'Dark', 'Slow', 'Fast')           # Existing ChoiceType names: Switch, Xbox, PlayStation, Keyboard, Automatic
+STYLES = ('xbox', 'playstation', 'keyboard')                # Switch is the game's own font
 SAVE_TYPES = ('Bool BoolArray Int IntArray Float FloatArray Enum EnumArray Vector2 Vector2Array Vector3 Vector3Array '
               'String16 String16Array String32 String32Array String64 String64Array Binary BinaryArray UInt UIntArray '
               'Int64 Int64Array UInt64 UInt64Array WString16 WString16Array WString32 WString32Array WString64 '
@@ -62,7 +64,7 @@ OPTION_SAVE = 1                               # SaveFileIndex of option.sav
 # names are the consoles' names in every language; they are plain text because the choice box draws with a different
 # font stack per language (Nintendo's text font, or the system's Chinese and Korean fonts) that has no button icons.
 TEXT = {
-    'en': ('Button icons', "Choose which controller's buttons appear in\non-screen prompts. Takes effect the next time\nyou start the game."),
+    'en': ('Button icons', "Choose button prompts and the Controls picture.\nAutomatic detects your controller at launch.\nChanges take effect when you restart the game."),
     'de': ('Tastensymbole', 'Lege fest, welche Controller-Tasten in den\nHinweisen auf dem Bildschirm erscheinen. Gilt\nab dem nächsten Spielstart.'),
     'fr': ('Icônes des boutons', "Choisissez les boutons de manette affichés\ndans les indications à l'écran. Prend effet\nau prochain lancement du jeu."),
     'es': ('Iconos de botones', 'Elige qué botones de mando aparecen en las\nindicaciones en pantalla. Se aplicará la\npróxima vez que inicies el juego.'),
@@ -76,7 +78,13 @@ TEXT = {
     'zh-Hant': ('按鍵圖示', '選擇畫面上的按鍵提示顯示哪種控制器的按鍵。\n下次啟動遊戲時生效。'),
 }
 LANGUAGE = {'CNzh': 'zh-Hans', 'TWzh': 'zh-Hant', 'JPja': 'ja', 'KRko': 'ko'}   # other archives: by their last two letters
-CHOICE_NAMES = ('Switch', 'Xbox', 'PlayStation')
+CHOICE_NAMES = ('Switch', 'Xbox', 'PlayStation', 'Keyboard', 'Automatic')
+LOCAL_CHOICES = {
+    'de': ('Tastatur', 'Automatisch'), 'fr': ('Clavier', 'Automatique'), 'es': ('Teclado', 'Automático'),
+    'it': ('Tastiera', 'Automatico'), 'pt': ('Teclado', 'Automático'), 'nl': ('Toetsenbord', 'Automatisch'),
+    'ru': ('Клавиатура', 'Автоматически'), 'ja': ('キーボード', '自動'), 'ko': ('키보드', '자동'),
+    'zh-Hans': ('键盘', '自动'), 'zh-Hant': ('鍵盤', '自動'),
+}
 
 
 def murmur3(text, seed=0):
@@ -123,7 +131,7 @@ def add_option_data(data):
     template = [e for e in data['Data']['Enum'] if e['Hash'] == murmur3('OptionData.DisplayMode')]
     assert len(template) == 1, 'no OptionData.DisplayMode to copy the entry layout from'
     template = template[0]
-    entry = {'DefaultValue': UInt(murmur3(CHOICES[0])), 'Hash': UInt(flat), 'RawValues': list(CHOICES),
+    entry = {'DefaultValue': UInt(murmur3(CHOICES[-1])), 'Hash': UInt(flat), 'RawValues': list(CHOICES),
              'ResetTypeValue': Int(template['ResetTypeValue']), 'SaveFileIndex': Int(OPTION_SAVE),
              'Values': [UInt64(murmur3(c)) for c in CHOICES]}
     assert entry.keys() == template.keys()
@@ -152,7 +160,7 @@ def add_option_text(msbt, language):
         assert label not in msbt.labels, f'{MESSAGES} already has {label}'
     assert '1005' in msbt.labels and '0005' in msbt.labels, f'{MESSAGES} lacks the neighbouring rows'
     msbt.set('1006', name.encode('utf-16-le')); msbt.set('0006', description.encode('utf-16-le'))
-    for i, choice in enumerate(CHOICE_NAMES):
+    for i, choice in enumerate(CHOICE_NAMES[:3] + LOCAL_CHOICES.get(language, CHOICE_NAMES[3:])):
         msbt.set(f'1006_{i:02d}', choice.encode('utf-16-le'))
     return msbt
 
@@ -251,6 +259,7 @@ def main():
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument('--app', type=Path, help='the built Tears of the Kingdom.app')
     source.add_argument('--romfs', type=Path, help='a folder holding romfs.bin and runtime-index.bin')
+    parser.add_argument('--base-ui', type=Path, help='optional patched Common blarc.zs to compose with (default: sibling romfs-patches)')
     parser.add_argument('--version', choices=VERSIONS, help='the game version, with --app')
     args = parser.parse_args()
     romfs_dir = args.romfs
@@ -293,6 +302,33 @@ def main():
     font_original = zstd.get_frame_info(romfs.read(icons.ARCHIVE)).decompressed_size
     sizes[icons.ARCHIVE[:-3]] = (font_original, max(font_sizes))
 
+    # Both the original UI and a composed default-patches UI are available. Runtime selects by source hash,
+    # preserving capture fixes (or custom layouts supplied through --base-ui) without stacking duplicate overlays.
+    ui_path = romfs.glob('UI/LayoutArchive/Common.Product.', '.blarc.zs')
+    assert len(ui_path) == 1
+    ui_path = ui_path[0]
+    raw = romfs.read(ui_path)
+    patched = args.base_ui or romfs_dir.parent / 'romfs-patches' / ui_path
+    sources = {'': raw}
+    if patched.is_file():
+        sources['-patched'] = patched.read_bytes()
+    pictures = {}
+    for suffix, source in sources.items():
+        info = zstd.get_frame_info(source)
+        dic = romfs.dictionaries.get(info.dictionary_id)
+        archive = zstd.decompress(source, zstd_dict=dic)
+        members = sarc_members(archive)
+        texture = archive[slice(*members['timg/__Combined.bntx'])]
+        layout_name = 'blyt/PaSystemController_00.bflyt'
+        layout = controller_pictures.replace_callouts(archive[slice(*members[layout_name])])
+        assert all(b'N_Line_00' not in archive[lo:hi] for name,(lo,hi) in members.items()
+                   if name.startswith('anim/PaSystemController_00') and name.endswith('.bflan')), 'connector parent is animated'
+        for style in STYLES:
+            out = sarc_replace(archive, {'timg/__Combined.bntx': controller_pictures.replace_textures(texture, style),
+                                         layout_name: layout})
+            assert len(out) == len(archive), 'controller replacement grew the UI archive'
+            pictures[style + suffix] = (romfs.pack(out, dic), hashlib.sha256(source).hexdigest())
+
     rstb = romfs.glob('System/Resource/ResourceSizeTable.Product.', '.rsizetable.zs')
     assert len(rstb) == 1, rstb
     data, dictionary = romfs.unpack(rstb[0])
@@ -313,6 +349,10 @@ def main():
     write(args.output / 'menu', files)
     for style, blob in fonts.items():
         write(args.output / f'icons-{style}', {icons.ARCHIVE: blob})
+    for style, (blob, source_hash) in pictures.items():
+        folder = args.output / f'pictures-{style}'
+        write(folder, {ui_path: blob})
+        (folder / 'source.tsv').write_text(f'{ui_path}\t{source_hash}\n')
     for line in report:
         print('  size table:', line)
 

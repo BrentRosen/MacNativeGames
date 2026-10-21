@@ -475,12 +475,14 @@ def controls_option(tree, version, logs):
     """The Options menu's Button icons row (scripts/make_controls_option.py) in extracted/<version>/romfs-controls, made
     again when one of its scripts changes. On a version it was not checked on, a refusal leaves the app without the row."""
     out = tree / f'extracted/{version}/romfs-controls'
-    scripts = ('make_controls_option.py', 'nx_formats.py', 'make_button_icons.py', 'make_mod_manifest.py')
+    scripts = ('make_controls_option.py', 'nx_formats.py', 'make_button_icons.py', 'make_mod_manifest.py', 'controller_pictures.py')
     stamp = {name: sha256(tree / 'scripts' / name) for name in scripts}
+    ui_sources = sorted((tree / f'extracted/{version}/romfs-patches/UI/LayoutArchive').glob('Common.*.blarc.zs'))
+    stamp.update({str(p.relative_to(tree)): sha256(p) for p in ui_sources})
     record = out / 'sources.json'
     if (out / 'menu/manifest.tsv').is_file() and record.is_file() and json.loads(record.read_text()) == stamp:
         return
-    say('2/4 data: the Button icons row of the Options menu (Switch / Xbox / PlayStation)')
+    say('2/4 data: the Button icons row of the Options menu (Switch / Xbox / PlayStation / Keyboard / Automatic)')
     try:
         run([tree / '.venv/bin/python', 'scripts/make_controls_option.py', '--romfs', f'extracted/{version}/romfs',
              '--output', f'extracted/{version}/romfs-controls'], logs / f'{version}-controls_option.log', cwd=tree)
