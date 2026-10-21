@@ -13,6 +13,8 @@ static pthread_mutex_t gamepadLock = PTHREAD_MUTEX_INITIALIZER;
 static RuntimeGamepadState gamepadState;
 static uint64_t pressedEdges;
 static BOOL started;
+static dispatch_group_t initialGamepad;
+static BOOL initialGamepadReady;
 static uint16_t controllerMap[CONTROLLER_BUTTONS];
 static uint8_t controllerModes[CONTROLLER_BUTTONS];
 static uint64_t physicalPrev;
@@ -51,18 +53,30 @@ static int32_t stronger_axis(int32_t a, int32_t b) {
     return abs(b) > abs(a) ? b : a;
 }
 
-/* Queried once when RomFS overlays initialize; hot-plugging takes effect at the next launch, like manual styles. */
+/* The connected-controller list can be empty until the main run loop delivers its initial notifications.
+   RomFS initializes on the guest thread before that happens. Wait for the first extended pad (at most 1.5 s),
+   leaving the main thread free to deliver discovery. Manual styles never call this function. */
 const char *runtime_gamepad_icon_style(void) {
     @autoreleasepool {
-        for (GCController *controller in GCController.controllers) {
-            if (!controller.extendedGamepad) continue;
-            if ([controller.extendedGamepad isKindOfClass:GCDualSenseGamepad.class] ||
-                [controller.extendedGamepad isKindOfClass:GCDualShockGamepad.class]) return "playstation";
-            return gamepad_icon_style(controller.productCategory.UTF8String, controller.vendorName.UTF8String);
-        }
-        return "keyboard";
+        if (started && !NSThread.isMainThread)
+            dispatch_group_wait(initialGamepad, dispatch_time(DISPATCH_TIME_NOW, 1500 * NSEC_PER_MSEC));
+        __block const char *style = "keyboard";
+        void (^select)(void) = ^{
+            for (GCController *controller in GCController.controllers) {
+                if (!controller.extendedGamepad) continue;
+                if ([controller.extendedGamepad isKindOfClass:GCDualSenseGamepad.class] ||
+                    [controller.extendedGamepad isKindOfClass:GCDualShockGamepad.class]) style = "playstation";
+                else style = gamepad_icon_style(controller.productCategory.UTF8String, controller.vendorName.UTF8String);
+                break;
+            }
+        };
+        if (started && !NSThread.isMainThread) dispatch_sync(dispatch_get_main_queue(), select);
+        else select();  /* Headless probes have no UI run loop. */
+        fprintf(stderr, "[totk-input] Automatic button icons: %s\n", style);
+        return style;
     }
 }
+
 
 static int face_by_position(GCController *controller) {
     return gamepad_face_by_position(controller.productCategory.UTF8String, controller.vendorName.UTF8String);
@@ -151,6 +165,10 @@ static void attach_gamepad(GCController *controller) {
     fprintf(stderr, "[totk-input] native gamepad connected: %s (%s), face buttons by %s\n",
             (controller.vendorName ?: @"unknown").UTF8String,
             (controller.productCategory ?: @"unknown").UTF8String, face_by_position(controller) ? "position" : "label");
+    if (!initialGamepadReady && initialGamepad) {
+        initialGamepadReady = YES;
+        dispatch_group_leave(initialGamepad);
+    }
     runtime_feedback_attach(controller);
     refresh_gamepads();
 }
@@ -158,6 +176,8 @@ static void attach_gamepad(GCController *controller) {
 void runtime_gamepad_start(void) {
     if (started) return;
     started = YES;
+    initialGamepad = dispatch_group_create();
+    dispatch_group_enter(initialGamepad);
     load_controller_map();
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
     [center addObserverForName:GCControllerDidConnectNotification object:nil queue:NSOperationQueue.mainQueue

@@ -64,7 +64,8 @@ its files have none, so the writer shares exactly what the original shares.
 
 ### Automatic and Controls pictures
 
-Automatic uses the first extended controller reported by GameController at startup: DualSense/DualShock → PlayStation,
+Automatic waits up to 1.5 seconds for the initial GameController connection notification before choosing the first
+extended controller. This prevents an already-connected pad from being mistaken for a keyboard during startup: DualSense/DualShock → PlayStation,
 Nintendo/Joy-Con → Switch, Xbox and generic/MFi pads → Xbox, no extended controller → Keyboard. Hot-plugging is reflected
 at the next launch. Manual styles override detection. Keyboard prompts match the built-in keyboard bindings.
 
