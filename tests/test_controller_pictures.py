@@ -1,7 +1,11 @@
 """Controller artwork on synthetic BNTX metadata; never uses game content."""
+import hashlib
+import io
 import struct
+import tempfile
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'games/totk/scripts'))
@@ -34,7 +38,7 @@ class ControllerPictures(unittest.TestCase):
     def test_artwork_replaces_every_controller_state_and_preserves_other_assets(self):
         original,regions = archive()
         for style in ('keyboard','xbox','playstation'):
-            out = pictures.replace_textures(original,style)
+            out = pictures.replace_textures(original,style,Image.new('RGBA',(32,24),(35,80,140,255)))
             restored = bytearray(out)
             for at,lo,hi,name in regions:
                 if name == 'Unrelated':
@@ -62,6 +66,35 @@ class ControllerPictures(unittest.TestCase):
         out = pictures.replace_callouts(bytes(layout))
         self.assertEqual(out[28],2)
         self.assertEqual(out[:28]+out[29:],layout[:28]+layout[29:])
+
+    def test_xbox_rgb_and_transparency_survive_texture_encoding(self):
+        image = Image.new('RGBA',(8,4),(15,90,220,255))
+        for y in range(4):
+            for x in range(4): image.putpixel((x,y),(230,20,30,0 if x==0 else 255))
+        decoded = Image.frombytes('RGBA',image.size,pictures.color_bc3(image),'bcn',3)
+        red,blue = decoded.getpixel((2,2)),decoded.getpixel((6,2))
+        self.assertGreater(red[0],180);self.assertLess(red[2],60)
+        self.assertGreater(blue[2],180);self.assertLess(blue[0],60)
+        self.assertEqual(decoded.getpixel((0,2))[3],0)
+        self.assertEqual(blue[3],255)
+
+    def test_official_image_is_verified_and_reused_without_network(self):
+        image = Image.new('RGBA',(1200,1200),(20,30,40,255));out=io.BytesIO();image.save(out,format='PNG')
+        data=out.getvalue();digest=hashlib.sha256(data).hexdigest()
+        with tempfile.TemporaryDirectory() as cache, patch.dict(pictures.PRODUCT_ARTWORK,
+                {'xbox': {'url': 'https://example.invalid/controller.png', 'sha256': digest, 'size': (1200,1200)}}):
+            with patch.object(pictures.urllib.request,'urlopen',return_value=io.BytesIO(data)) as fetch:
+                self.assertEqual(pictures.load_controller_artwork('xbox',cache).size,(1200,1200))
+                fetch.assert_called_once()
+            with patch.object(pictures.urllib.request,'urlopen',side_effect=AssertionError('unexpected download')):
+                self.assertEqual(pictures.load_controller_artwork('xbox',cache).getpixel((10,10)),(20,30,40,255))
+                (Path(cache)/f'xbox-{digest}.png').write_bytes(b'changed')
+                with self.assertRaisesRegex(ValueError,'hash differs'): pictures.load_controller_artwork('xbox',cache)
+
+    def test_xbox_has_no_procedural_placeholder_fallback(self):
+        for style in ('xbox','playstation'):
+            with self.assertRaisesRegex(ValueError,'official .* product image'):
+                pictures.drawing(style)
 
     def test_compressed_coverage_decodes(self):
         alpha = [0,36,73,109,146,182,219,255]*2

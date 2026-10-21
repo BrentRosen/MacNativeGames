@@ -1,21 +1,86 @@
-"""Original, procedural Controls-screen drawings; replace only controller textures in the player's UI archive.
+"""Controls-screen artwork (official Xbox and PlayStation renders; procedural keyboard); replace only controller textures in the player's UI archive.
 
 The six Console/Grip/Pro textures (including their alternate state) share a canvas. BC3 uses the same 16-byte
 blocks and storage as the original BC7; names, dimensions, pointers and all other textures stay untouched.
 """
+import hashlib
+import io
 import struct
-from PIL import Image, ImageDraw, ImageFont
+import tempfile
+import urllib.request
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+# Official transparent front-facing product renders. Downloaded to the ignored local build cache;
+# neither manufacturer's artwork is committed to the repository.
+PRODUCT_ARTWORK = {
+    'xbox': {
+        'url': ('https://cdn-dynmedia-1.microsoft.com/is/image/microsoftcorp/'
+                'gldn-Xbox-Cntrl-Black-b00?fmt=png-alpha&wid=1200'),
+        'sha256': '27d0be6cf6811138bc0fc3cb04100064842b8d71fae8074bc0d3b178b014acaa',
+        'size': (1200,1200),
+        'copyright': 'Microsoft; Xbox Wireless Controller official product render',
+    },
+    'playstation': {
+        'url': ('https://gmedia.playstation.com/is/image/SIEPDC/'
+                'dualsense-controller-product-thumbnail-01-en-14sep21?fmt=png-alpha&wid=1200'),
+        'sha256': 'f356a7b2951f8ba82ffae25ceb729d84ed782b0241c921811503e5bd15d32b79',
+        'size': (1200,675),
+        'copyright': 'Sony Interactive Entertainment; DualSense official product render',
+    },
+}
 
 
-def drawing(style, width=580, height=340):
+def load_controller_artwork(style, cache):
+    source = PRODUCT_ARTWORK[style]
+    cache = Path(cache); target = cache / f'{style}-{source["sha256"]}.png'
+    if target.is_file():
+        data = target.read_bytes()
+    else:
+        with urllib.request.urlopen(source['url'], timeout=30) as response:
+            data = response.read(8 * 1024 * 1024 + 1)
+        if len(data) > 8 * 1024 * 1024:
+            raise ValueError(f'{style} product image exceeds the expected download size')
+    if hashlib.sha256(data).hexdigest() != source['sha256']:
+        raise ValueError(f'{style} product image hash differs; refusing unverified artwork')
+    image = Image.open(io.BytesIO(data)); image.load()
+    if image.size != source['size'] or image.mode != 'RGBA' or not image.getchannel('A').getbbox():
+        raise ValueError(f'{style} product image has unexpected geometry or transparency')
+    if not target.exists():
+        cache.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=cache, suffix='.tmp', delete=False) as f:
+            f.write(data); temporary = Path(f.name)
+        temporary.replace(target)
+    return image
+
+
+def color_bc3(image):
+    """Encode actual RGB and alpha, preserving product shading and colored face buttons."""
+    out = io.BytesIO()
+    image.save(out, format='DDS', pixel_format='DXT5')
+    data = out.getvalue()
+    assert data[:4] == b'DDS ' and data[84:88] == b'DXT5'
+    blocks = data[128:]
+    assert len(blocks) == ((image.width+3)//4)*((image.height+3)//4)*16
+    return blocks
+
+
+def drawing(style, width=580, height=340, product_image=None):
+    if style in PRODUCT_ARTWORK:
+        if product_image is None:
+            raise ValueError(f'the verified official {style} product image is required')
+        # Preserve the product render and its alpha; only fit it to the existing texture canvas.
+        product = ImageOps.contain(product_image.crop(product_image.getchannel('A').getbbox()),
+                                   (width-24,height-16), Image.Resampling.LANCZOS)
+        canvas = Image.new('RGBA', (width,height))
+        canvas.alpha_composite(product, ((width-product.width)//2,(height-product.height)//2))
+        return canvas
     scale = 3
     im = Image.new('RGBA', (width * scale, height * scale))
     d = ImageDraw.Draw(im)
     def box(bounds, radius=10, fill=None, outline='white', line=2):
         d.rounded_rectangle(tuple(round(v * scale) for v in bounds), radius * scale, fill=fill,
                             outline=outline, width=line * scale)
-    def circle(x, y, r, fill=None):
-        d.ellipse(((x-r)*scale, (y-r)*scale, (x+r)*scale, (y+r)*scale), fill=fill, outline='white', width=2*scale)
     def text(x, y, label, size=16):
         # Pillow's bundled font keeps generation independent of installed system fonts.
         font = ImageFont.load_default(size=size*scale)
@@ -38,33 +103,6 @@ def drawing(style, width=580, height=340):
             tip=(x+dx*7,y+dy*7)
             d.line([((tip[0]-dx*5+dy*5)*scale,(tip[1]-dy*5-dx*5)*scale), (tip[0]*scale,tip[1]*scale),
                     ((tip[0]-dx*5-dy*5)*scale,(tip[1]-dy*5+dx*5)*scale)], fill='white',width=2*scale)
-    else:
-        # Distinct silhouettes and stick positions; the face buttons match the runtime's positional mapping.
-        ps = style == 'playstation'
-        body = [(100,55),(480,55),(510,95),(545,265),(515,302),(475,295),(410,225),
-                (170,225),(105,295),(65,302),(35,265),(70,95)]
-        d.polygon([(x*scale,y*scale) for x,y in body], fill='#202020', outline='white', width=3*scale)
-        for x,label in ((138,'L1' if ps else 'LB'),(442,'R1' if ps else 'RB')):
-            box((x-48,30,x+48,57),8,fill='#303030');text(x,44,label,14)
-            text(x,17, 'L2' if ps and x<290 else 'R2' if ps else 'LT' if x<290 else 'RT',13)
-        if ps: box((225,70,355,130),8,fill='#303030')
-        else: circle(290,91,16);text(290,91,'X',15)
-        lx,ly = (215,205) if ps else (146,125)
-        for x,y in ((lx,ly),(365,205)):
-            circle(x,y,32,'#383838');circle(x,y,24);text(x,y,'L3' if x==lx else 'R3',12)
-        dx,dy = (140,143) if ps else (218,205)
-        box((dx-10,dy-28,dx+10,dy+28),2,fill='#484848',outline=None)
-        box((dx-28,dy-10,dx+28,dy+10),2,fill='#484848',outline=None)
-        for x,y,label in ((445,108,'Y'),(410,143,'X'),(480,143,'B'),(445,178,'A')):
-            circle(x,y,15,'#383838')
-            if not ps: text(x,y,label,17)
-            elif label=='B': circle(x,y,8)
-            elif label=='Y':
-                d.line([(x*scale,(y-8)*scale),((x-8)*scale,(y+7)*scale),((x+8)*scale,(y+7)*scale),(x*scale,(y-8)*scale)],fill='white',width=2*scale)
-            elif label=='X': box((x-7,y-7,x+7,y+7),0,line=2)
-            else:
-                for sign in (-1,1): d.line([((x-7)*scale,(y-7*sign)*scale),((x+7)*scale,(y+7*sign)*scale)],fill='white',width=2*scale)
-        text(205,92,'Create' if ps else 'View',11);text(376,92,'Options' if ps else 'Menu',11)
     return im.resize((width,height), Image.Resampling.LANCZOS)
 
 
@@ -83,7 +121,7 @@ def bc3_block(pixels):
     return bytes((255,0)) + bits.to_bytes(6,'little') + b'\xff\xff\x00\x00' + b'\0'*4
 
 
-def replace_textures(data, style):
+def replace_textures(data, style, product_image=None):
     """BNTX with all controller states replaced, and original Switch-shaped shadows cleared. Fail on unknown geometry."""
     assert data[:8] == b'BNTX\0\0\0\0' and data[12:14] == b'\xff\xfe', 'unsupported BNTX'
     out = bytearray(data); count = struct.unpack_from('<I',data,0x24)[0]; table = struct.unpack_from('<Q',data,0x28)[0]
@@ -108,12 +146,15 @@ def replace_textures(data, style):
         else:
             assert (fmt,w,h) == (0x2d06,580,340), (name,hex(fmt),w,h)  # BC7 sRGB -> BC3 sRGB
             if (w,h,tile,size) not in cache:
-                im = drawing(style,w,h); px = im.load(); blocks = bytearray(size)
+                im = drawing(style,w,h,product_image); px = im.load(); blocks = bytearray(size)
+                color = color_bc3(im) if style in PRODUCT_ARTWORK else None
                 for y in range(0,h,4):
                     for x in range(0,w,4):
                         off = block_offset(x//4*16,y//4,((w+3)//4)*16,tile & 7)
                         assert off+16 <= size
-                        blocks[off:off+16] = bc3_block([px[min(x+i,w-1),min(y+j,h-1)] for j in range(4) for i in range(4)])
+                        linear = ((y//4)*((w+3)//4)+x//4)*16
+                        blocks[off:off+16] = color[linear:linear+16] if color is not None else bc3_block(
+                            [px[min(x+i,w-1),min(y+j,h-1)] for j in range(4) for i in range(4)])
                 cache[w,h,tile,size] = blocks
             out[start:start+size] = cache[w,h,tile,size]
             struct.pack_into('<I',out,at+0x1c,0x1c06)
@@ -125,7 +166,7 @@ def replace_textures(data, style):
 def replace_callouts(layout):
     """Keep the action labels, but hide connectors aimed at the original Switch hardware.
 
-    The replacement diagrams label every input directly. Original endpoint animations target Switch stick/button
+    The replacement pictures retain their own input markings. Original endpoint animations target Switch stick/button
     positions, so retaining those lines over a different device would point players at the wrong inputs.
     """
     assert layout[:4] == b'FLYT' and layout[4:6] == b'\xff\xfe'

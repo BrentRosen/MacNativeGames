@@ -68,9 +68,9 @@ Automatic uses the first extended controller reported by GameController at start
 Nintendo/Joy-Con → Switch, Xbox and generic/MFi pads → Xbox, no extended controller → Keyboard. Hot-plugging is reflected
 at the next launch. Manual styles override detection. Keyboard prompts match the built-in keyboard bindings.
 
-`controller_pictures.py` draws original controller/key diagrams and replaces the twelve controller and shadow textures
+`controller_pictures.py` uses Microsoft’s official front-facing Carbon Black Xbox and Sony’s official white DualSense product renders, and draws the keyboard diagram. It replaces the twelve controller and shadow textures
 in the player's `timg/__Combined.bntx` inside the Common UI archive. All texture names, sizes, pointers and other assets
-stay intact. All six controller states get the chosen style; Switch retains the original artwork. The new diagrams label their inputs directly; the original Switch connector lines are hidden, while action labels remain. Pictures follow the
+stay intact. Controller textures preserve each product image’s RGB shading, button details and transparency using Pillow’s BC3 encoder. Each product render is downloaded once into the ignored local build cache, verified against a pinned SHA-256, and recorded in `artwork-source.json`; it is not committed to the repository. Sources: [Microsoft Store](https://www.microsoft.com/en-us/d/xbox-wireless-controller/8xn59crbsqgz), [PlayStation](https://www.playstation.com/en-us/accessories/dualsense-wireless-controller/). All six controller states get the chosen style; Switch retains the original artwork. The product pictures retain their own input markings; the original Switch connector lines are hidden, while action labels remain. Pictures follow the
 same restart rule as prompts. Fixed-image tutorial prompts outside this screen still use their original artwork.
 
 `pictures-<style>` holds the original-UI variant; `pictures-<style>-patched` composes with the sibling `romfs-patches`
@@ -134,7 +134,7 @@ before. `make_button_icons.py` also writes the PlayStation style for a mod folde
 所有文件都用“不改内容就逐字节还原”的格式重写（`scripts/nx_formats.py` 的 BYML、MSBT、SARC），否则脚本停止。游戏的设置
 解析器不接受原文件里没有的共享 BYML 节点，所以写出时只共享原文件共享的部分。
 
-自动模式（默认）在启动时检测第一个手柄：DualSense/DualShock 显示 PlayStation，任天堂手柄显示 Switch，Xbox 或通用手柄显示 Xbox，没有手柄显示键盘。手动选择优先，重新启动后生效。控制说明画面也会使用相应的原创手柄或键盘示意图；已有存档的选择保持不变。自定义 UI 覆盖层没有匹配的图片版本时保留其原有图片，日志会说明原因。
+自动模式（默认）在启动时检测第一个手柄：DualSense/DualShock 显示 PlayStation，任天堂手柄显示 Switch，Xbox 或通用手柄显示 Xbox，没有手柄显示键盘。手动选择优先，重新启动后生效。控制说明画面也会使用相应的手柄或键盘图片（Xbox 和 PlayStation 分别使用微软和索尼官方产品图）；已有存档的选择保持不变。自定义 UI 覆盖层没有匹配的图片版本时保留其原有图片，日志会说明原因。
 
 ### 和玩家模组一起用
 
