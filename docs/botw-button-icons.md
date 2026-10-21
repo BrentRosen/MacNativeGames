@@ -18,8 +18,8 @@ If an earlier generated always-on font mod is installed, remove those seven font
 
 The Xbox and PlayStation labels follow the default controller mapping by position: Switch A/B/X/Y become Xbox
 B/A/Y/X or PlayStation Circle/Cross/Triangle/Square. Custom controller remaps or `TOTK_FACE_BUTTONS=label` can disagree
-with those prompts. Keyboard labels follow the launcher's default keys. The Controls screen also follows the selected style: flat Xbox or DualShock 4 illustrations with the native
-blue callouts moved to the corresponding inputs, or a keyboard illustration. Other fixed-image tutorials retain
+with those prompts. Keyboard labels follow the launcher's default keys. The Controls screen also follows the selected style: light Xbox or DualSense illustrations with the native
+blue group outlines and callouts moved to the corresponding inputs, or a keyboard illustration. Other fixed-image tutorials retain
 their original artwork.
 
 ## Standalone mod
@@ -53,7 +53,7 @@ binds each replacement to the original archive's SHA-256.
 
 Controls artwork replaces only two textures in `Layout/Common.sblarc` inside `Pack/Bootup.pack`. The allocated
 texture storage, grayscale/alpha format, component mapping, tiling and decoded Common archive size stay unchanged. The layout and its animations place the native
-callouts at the drawn controls while preserving localized text and action visibility. Common is recompressed with
+callouts and group outlines at the drawn controls, including the expanded rear view, while preserving localized text and action visibility. Common is recompressed with
 LZ77; the outer pack can grow slightly. Generation refuses a game whose resource table gives Bootup.pack a fixed
 size budget. Other pack members remain byte-identical.
 
@@ -62,3 +62,15 @@ of unfamiliar geometry. Native AppKit tests exercise all five choices, checkmark
 fallback, and delayed controller discovery. Build tests check generation of all three styles for both game versions. Generation was also checked against the player's 1.9.0 fonts for all three styles. Xbox
 prompts were checked in-game on Mac 1.9.0 using a private copy of the save. BotW 1.6.0 and non-English gameplay were
 not available for in-game verification.
+
+## Player-supplied controller artwork
+
+The build reuses optional personal artwork from
+`~/Library/Application Support/MacNativeGames/BotW/controller-art/<style>/`. Each style folder contains
+`front.png` (580×340), `rear.png` (576×100), and `layout.json` with front anchors, optional group radii,
+shoulder anchors and rear display geometry. Both images keep transparency. Imported Wii U textures must first
+be decoded and converted; copying a Wii U Bootup.pack into this Switch build is not supported. Artwork hashes
+are part of the build cache, so changing an image regenerates the affected sets on the next build.
+
+The standalone generator also accepts `--controller-art <style-folder>`. This personal artwork is used only
+on the local machine; downloaded mod assets are not checked into the repository.

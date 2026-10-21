@@ -1,27 +1,27 @@
-"""Shared original Xbox, DualShock 4 and keyboard vector diagrams (580 x 340)."""
+"""Shared original Xbox, DualSense and keyboard vector diagrams (580 x 340)."""
 import math
 from PIL import Image, ImageDraw, ImageFont
 
 
 # Coordinates are shared by the vector drawings and native callout placement (580 x 340 canvas).
-# They describe a front-facing Xbox pad and a DualShock 4, matching the game's flat, outlined illustration style.
+# They describe a front-facing Xbox pad and a DualSense, matching the game's flat, outlined illustration style.
 DIAGRAM_ANCHORS = {
     'xbox': {'ZL': (174,12), 'ZR': (406,12), 'L': (142,33), 'R': (438,33),
-             'Minus': (230,69), 'Plus': (358,69), 'LStick': (170,112),
+             'Minus': (254,69), 'Plus': (326,69), 'LStick': (170,112),
              'CrossKey': (226,184), 'ABXY': (414,112), 'RStick': (362,184)},
     'playstation': {'ZL': (150,12), 'ZR': (430,12), 'L': (122,30), 'R': (458,30),
-                    'Minus': (207.6,60), 'Plus': (372.4,60), 'LStick': (222,188),
+                    'Minus': (178,56), 'Plus': (402,56), 'LStick': (222,188),
                     'CrossKey': (154,106.4), 'ABXY': (426,106.4), 'RStick': (358,188)},
 }
 GROUP_RADIUS = {'xbox': {'CrossKey': 39, 'ABXY': 54}, 'playstation': {'CrossKey': 43, 'ABXY': 54}}
 
 
 def controller_diagram(style, width=580, height=340):
-    """Original flat vector illustration: smooth shell contours, dark outlines and neutral grey input details."""
+    """Light controller diagrams with white inputs and fine grey seams, drawn at 4x."""
     assert style in DIAGRAM_ANCHORS
     scale = 4; image = Image.new('RGBA', (580*scale,340*scale)); draw = ImageDraw.Draw(image)
     def point(x,y): return ((50+.8*x)*scale,.8*y*scale)
-    def line(points, color='#151515', stroke=2):
+    def line(points, color='#777777', stroke=2):
         draw.line([point(*p) for p in points],fill=color,width=max(1,round(stroke*.8*scale)),joint='curve')
     def path(commands, fill='#393939', stroke=2.5):
         points=[]; current=None
@@ -37,72 +37,75 @@ def controller_diagram(style, width=580, height=340):
             elif command[0]=='Z': points.append(points[0])
         if fill is not None: draw.polygon([point(*p) for p in points],fill=fill)
         if stroke: line(points,stroke=stroke)
-    def oval(x,y,rx,ry=None,fill='#585858',stroke=2):
+    def oval(x,y,rx,ry=None,fill='#eeeeee',stroke=2):
         ry=rx if ry is None else ry
-        draw.ellipse((*point(x-rx,y-ry),*point(x+rx,y+ry)),fill=fill,outline='#151515',width=max(1,round(stroke*.8*scale)))
+        draw.ellipse((*point(x-rx,y-ry),*point(x+rx,y+ry)),fill=fill,outline='#777777',width=max(1,round(stroke*.8*scale)))
     def rounded(bounds,radius=8,fill='#242424',stroke=2):
         x0,y0,x1,y1=bounds
         draw.rounded_rectangle((*point(x0,y0),*point(x1,y1)),radius=radius*.8*scale,fill=fill,
-                               outline='#151515',width=max(1,round(stroke*.8*scale)))
-    def label(x,y,value,size=20,color='#b7b7b7'):
+                               outline='#777777',width=max(1,round(stroke*.8*scale)))
+    def label(x,y,value,size=20,color='#777777'):
         draw.text(point(x,y),value,font=ImageFont.load_default(size=round(size*.8*scale)),fill=color,anchor='mm')
     def stick(x,y):
-        oval(x,y,45,fill='#303030',stroke=3);oval(x,y,36,fill='#595959',stroke=2)
+        oval(x,y,45,fill='#aaaaaa',stroke=3);oval(x,y,36,fill='#f0f0f0',stroke=2)
         oval(x,y,31,fill=None,stroke=1)
     def plus(x,y):
         pts=[(-11,-33),(11,-33),(11,-11),(33,-11),(33,11),(11,11),(11,33),(-11,33),(-11,11),(-33,11),(-33,-11),(-11,-11)]
-        path([('M',x+pts[0][0],y+pts[0][1]),*[('L',x+a,y+b) for a,b in pts[1:]],('Z',)],fill='#5c5c5c',stroke=2)
+        path([('M',x+pts[0][0],y+pts[0][1]),*[('L',x+a,y+b) for a,b in pts[1:]],('Z',)],fill='#eeeeee',stroke=2)
         for dx,dy in ((0,-1),(0,1),(-1,0),(1,0)):
             cx,cy=x+dx*23,y+dy*23
             triangle=[(cx+dx*4,cy+dy*4),(cx-dx*3+dy*4,cy-dy*3-dx*4),(cx-dx*3-dy*4,cy-dy*3+dx*4)]
-            draw.polygon([point(*p) for p in triangle],fill='#aeaeae')
+            draw.polygon([point(*p) for p in triangle],fill='#888888')
     # Separate trigger/bumper pods and a curved shoulder rim, rather than the old angular generic silhouette.
     for x in (155,445):
-        path([('M',x-48,28),('C',x-42,6,x+35,5,x+45,27),('L',x+44,48),('L',x-47,48),('Z',)],fill='#343434')
+        path([('M',x-48,28),('C',x-42,6,x+35,5,x+45,27),('L',x+44,48),('L',x-47,48),('Z',)],fill='#999999')
     if style=='xbox':
         path([('M',130,30),('C',100,29,76,39,65,66),('C',46,112,33,186,20,265),
               ('C',8,328,18,368,48,387),('C',75,405,111,390,139,351),('L',193,278),
               ('C',210,253,253,252,300,253),('C',347,252,390,253,407,278),('L',461,351),
               ('C',489,390,525,405,552,387),('C',582,368,592,328,580,265),
               ('C',567,186,554,112,535,66),('C',524,39,500,29,470,30),
-              ('C',410,23,365,24,300,25),('C',235,24,190,23,130,30),('Z',)],fill='#303030')
+              ('C',410,23,365,24,300,25),('C',235,24,190,23,130,30),('Z',)],fill='#aaaaaa')
         path([('M',72,77),('C',142,44,224,44,300,45),('C',376,44,458,44,528,77),
               ('L',548,162),('C',514,190,474,230,432,286),('C',393,256,366,251,300,253),
-              ('C',234,251,207,256,168,286),('C',126,230,86,190,52,162),('Z',)],fill='#3a3a3a',stroke=1.5)
+              ('C',234,251,207,256,168,286),('C',126,230,86,190,52,162),('Z',)],fill='#b6b6b6',stroke=1.5)
         path([('M',70,69),('C',152,33,229,36,300,36),('C',371,36,448,33,530,69)],fill=None,stroke=2)
-        oval(300,65,20,fill='#202020')
+        oval(300,65,20,fill='#aaaaaa')
         # Xbox sphere/X mark, drawn as four curved lobes rather than a literal letter X in a circle.
         for sign in (-1,1):
             path([('M',300,49),('C',300+sign*4,50,300+sign*10,55,300+sign*15,65),
                   ('C',300+sign*10,61,300+sign*4,58,300,58),('C',300-sign*3,60,300-sign*9,67,300-sign*15,79),
-                  ('C',300-sign*12,64,300-sign*5,54,300,49),('Z',)],fill='#3a3a3a',stroke=0)
-        label(300,103,'XBOX',24,'#202020')
-        for x in (225,385): oval(x,86,13,fill='#555555')
+                  ('C',300-sign*12,64,300-sign*5,54,300,49),('Z',)],fill='#b6b6b6',stroke=0)
+        for x in (255,345): oval(x,86,13,fill='#eeeeee')
         # Native View and Menu marks.
-        for x,y in ((222,83),(228,89)):
-            line([(x-4,y-4),(x+4,y-4),(x+4,y+4),(x-4,y+4),(x-4,y-4)],'#b7b7b7',1.3)
-        for y in (81,86,91): line([(379,y),(391,y)],'#b7b7b7',1.4)
-        rounded((282,122,318,141),8,fill='#555555');line([(292,133),(308,133)],'#aaa',1.5)
+        for x,y in ((252,83),(258,89)):
+            line([(x-4,y-4),(x+4,y-4),(x+4,y+4),(x-4,y+4),(x-4,y-4)],'#777777',1.3)
+        for y in (81,86,91): line([(339,y),(351,y)],'#777777',1.4)
+        rounded((282,122,318,141),8,fill='#777777');line([(292,133),(308,133)],'#aaa',1.5)
         line([(300,133),(300,125),(296,128),(300,125),(304,128)],'#aaa',1.5)
         stick(150,140);stick(390,230);plus(220,230)
         for x,y,letter in ((455,100,'Y'),(415,140,'X'),(495,140,'B'),(455,180,'A')):
-            oval(x,y,21,fill='#575757');label(x,y,letter,25)
+            oval(x,y,21,fill='#eeeeee');label(x,y,letter,25)
     else:
-        path([('M',110,28),('C',76,23,57,34,46,64),('C',31,116,25,200,18,299),
-              ('C',13,350,23,385,55,395),('C',90,408,117,374,139,334),('L',185,262),
-              ('C',204,247,239,249,260,256),('L',340,256),('C',361,249,396,247,415,262),
-              ('L',461,334),('C',483,374,510,408,545,395),('C',577,385,587,350,582,299),
-              ('C',575,200,569,116,554,64),('C',543,34,524,23,490,28),
-              ('C',431,19,377,23,300,24),('C',223,23,169,19,110,28),('Z',)],fill='#303030')
-        # DualShock 4 face shell: wide recessed touchpad, symmetric sticks, split d-pad and no DualSense light strips.
-        path([('M',90,40),('L',510,40),('C',530,76,542,130,549,181),('C',516,206,469,247,427,288),
-              ('C',399,261,362,250,340,256),('L',260,256),('C',238,250,201,261,173,288),
-              ('C',131,247,84,206,51,181),('C',58,130,70,76,90,40),('Z',)],fill='#393939',stroke=1.5)
-        rounded((214,31,386,161),17,fill='#202020',stroke=3)
-        rounded((191,60,203,89),6,fill='#5b5b5b');rounded((397,60,409,89),6,fill='#5b5b5b')
+        # DualSense: broad white wings, tapered touchpad and a recessed grey center.
+        path([('M',112,28),('C',81,23,62,32,49,61),('C',31,102,22,179,14,278),
+              ('C',10,334,14,369,33,384),('L',91,402),('C',111,360,141,304,180,266),
+              ('C',211,245,249,250,300,251),('C',351,250,389,245,420,266),
+              ('C',459,304,489,360,509,402),('L',567,384),('C',586,369,590,334,586,278),
+              ('C',578,179,569,102,551,61),('C',538,32,519,23,488,28),
+              ('C',421,24,359,27,300,27),('C',241,27,179,24,112,28),('Z',)],fill='#cccccc',stroke=2)
+        path([('M',181,38),('C',194,102,198,147,214,161),('L',386,161),
+              ('C',402,147,406,102,419,38),('L',457,124),('C',468,174,457,224,421,262),
+              ('C',452,309,479,361,490,397),('L',509,402),('C',489,360,459,304,420,266),
+              ('C',389,245,351,250,300,251),('C',249,250,211,245,180,266),
+              ('C',141,304,111,360,91,402),('L',110,397),('C',121,361,148,309,179,262),
+              ('C',143,224,132,174,143,124),('Z',)],fill='#999999',stroke=0)
+        path([('M',181,29),('L',419,29),('L',402,137),('C',400,155,388,162,371,162),
+              ('L',229,162),('C',212,162,200,155,198,137),('Z',)],fill='#bdbdbd',stroke=2)
+        rounded((154,54,166,84),6,fill='#eeeeee');rounded((434,54,446,84),6,fill='#eeeeee')
         for row in range(3):
             for column in range(5-row): oval(284+column*8+row*4,182+row*8,1.7,fill='#151515',stroke=1)
-        oval(300,233,17,fill='#606060')
+        rounded((285,229,315,235),3,fill='#777777');rounded((286,199,314,210),4,fill='#777777')
         stick(215,235);stick(385,235)
         # Four independently outlined direction buttons, matching the DualShock reference.
         for turn in range(4):
@@ -110,28 +113,17 @@ def controller_diagram(style, width=580, height=340):
             for x,y in points:
                 for _ in range(turn):x,y=-y,x
                 rotated.append((130+x,133+y))
-            path([('M',*rotated[0]),*[('L',*p) for p in rotated[1:]],('Z',)],fill='#5a5a5a',stroke=2.5)
+            path([('M',*rotated[0]),*[('L',*p) for p in rotated[1:]],('Z',)],fill='#eeeeee',stroke=2.5)
         for x,y,symbol in ((470,93,'triangle'),(430,133,'square'),(510,133,'circle'),(470,173,'cross')):
-            oval(x,y,23,fill='#575757')
+            oval(x,y,23,fill='#eeeeee')
             if symbol=='circle':
-                draw.ellipse((*point(x-14,y-14),*point(x+14,y+14)),outline='#b7b7b7',width=round(2*.8*scale))
-            elif symbol=='triangle':line([(x,y-15),(x-15,y+12),(x+15,y+12),(x,y-15)],'#b7b7b7',2)
-            elif symbol=='square':line([(x-12,y-12),(x+12,y-12),(x+12,y+12),(x-12,y+12),(x-12,y-12)],'#b7b7b7',2)
+                draw.ellipse((*point(x-14,y-14),*point(x+14,y+14)),outline='#777777',width=round(2*.8*scale))
+            elif symbol=='triangle':line([(x,y-15),(x-15,y+12),(x+15,y+12),(x,y-15)],'#777777',2)
+            elif symbol=='square':line([(x-12,y-12),(x+12,y-12),(x+12,y+12),(x-12,y+12),(x-12,y-12)],'#777777',2)
             else:
-                line([(x-12,y-12),(x+12,y+12)],'#b7b7b7',2);line([(x-12,y+12),(x+12,y-12)],'#b7b7b7',2)
+                line([(x-12,y-12),(x+12,y+12)],'#777777',2);line([(x-12,y+12),(x+12,y-12)],'#777777',2)
     image=image.resize((580,340),Image.Resampling.LANCZOS)
     return image if (width,height)==(580,340) else image.resize((width,height),Image.Resampling.LANCZOS)
-
-
-def color_bc3(image):
-    """Encode actual RGB and alpha, preserving the flat diagram’s fills, fine outlines and transparency."""
-    out = io.BytesIO()
-    image.save(out, format='DDS', pixel_format='DXT5')
-    data = out.getvalue()
-    assert data[:4] == b'DDS ' and data[84:88] == b'DXT5'
-    blocks = data[128:]
-    assert len(blocks) == ((image.width+3)//4)*((image.height+3)//4)*16
-    return blocks
 
 
 def drawing(style, width=580, height=340):

@@ -131,6 +131,7 @@ def main():
     ap.add_argument('--version',choices=('botw160','botw190'))
     ap.add_argument('--style',choices=sorted(icons.STYLES),default='xbox')
     ap.add_argument('--replace',action='store_true');ap.add_argument('--preview',type=Path)
+    ap.add_argument('--controller-art',type=Path,help='optional front.png, rear.png and layout.json from player-supplied artwork')
     args=ap.parse_args();version=args.version or args.mod.name
     if version not in ('botw160','botw190'):ap.error('use a botw160/botw190 mod folder or --version')
     root=args.app/'Contents/Resources/totk' if args.app else None
@@ -159,7 +160,7 @@ def main():
         offset,size=index['System/Resource/ResourceSizeTable.product.srsizetable'];f.seek(offset);verify_pack_budget(f.read(size))
     if (args.mod/'Pack/Bootup.pack').exists() and not args.replace:
         ap.error('a Controls picture mod already exists; use --replace to change styles')
-    outputs['Pack/Bootup.pack']=replace_bootup(boot,args.style)
+    outputs['Pack/Bootup.pack']=replace_bootup(boot,args.style,args.controller_art)
     for n,data in outputs.items():
         target=args.mod/n;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
     lines,_,added,misspelt=manifest(args.mod,romfs);assert not added and not misspelt

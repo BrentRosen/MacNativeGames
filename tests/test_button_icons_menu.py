@@ -14,7 +14,7 @@ ROOT=Path(__file__).resolve().parents[1]
 class ButtonIconBuild(unittest.TestCase):
     def test_every_style_is_generated_for_the_selected_game_version(self):
         for version in ('botw160','botw190'):
-            with self.subTest(version=version),patch.object(build_app,'sha256',return_value='source-hash'),patch.object(build_app,'run') as run:
+            with self.subTest(version=version),patch.object(Path,'home',return_value=Path('/test/home')),patch.object(build_app,'sha256',return_value='source-hash'),patch.object(build_app,'run') as run:
                 tree=Path('/test/totk');botw=Path('/test/botw');logs=Path('/test/logs')
                 with patch.object(Path,'write_text'):
                     build_app.step_button_icons_botw(tree,botw,logs,version)
@@ -25,6 +25,18 @@ class ButtonIconBuild(unittest.TestCase):
                     self.assertEqual(args[args.index('--version')+1],version)
                     self.assertEqual(args[args.index('--style')+1],style)
                     self.assertIn('--replace',args)
+
+    def test_personal_artwork_is_passed_only_to_its_selected_style(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home=Path(tmp)
+            art=home/'Library/Application Support/MacNativeGames/BotW/controller-art/xbox'
+            art.mkdir(parents=True)
+            for name in ('front.png','rear.png','layout.json'):(art/name).write_bytes(b'fixture')
+            with patch.object(Path,'home',return_value=home),patch.object(build_app,'sha256',return_value='hash'),patch.object(build_app,'run') as run,patch.object(Path,'write_text'):
+                build_app.step_button_icons_botw(Path('/test/totk'),Path('/test/botw'),Path('/test/logs'),'botw190')
+            args=run.call_args_list[0].args[0]
+            self.assertEqual(args[args.index('--controller-art')+1],art)
+            for call in run.call_args_list[1:]:self.assertNotIn('--controller-art',call.args[0])
 
 @unittest.skipUnless(sys.platform=='darwin' and shutil.which('xcrun'),'requires macOS AppKit and Xcode tools')
 class ButtonIconsMenu(unittest.TestCase):

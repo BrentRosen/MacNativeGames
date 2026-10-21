@@ -1676,7 +1676,12 @@ def step_button_icons_botw(tree, botw, logs, version):
     target = tree / f'extracted/{version}/romfs-button-icons'
     files = [botw / 'scripts/make_button_icons.py', botw / 'scripts/controller_pictures.py',
              tree / 'scripts/make_button_icons.py', tree / 'scripts/controller_artwork.py']
-    fingerprint = dict(format=1, version=version, source=botw_expected(version)['romfs']['sha256'],
+    art_root = Path.home() / 'Library/Application Support/MacNativeGames/BotW/controller-art'
+    art_files = ('front.png', 'rear.png', 'layout.json')
+    art = {style: art_root/style for style in ('xbox', 'playstation', 'keyboard')
+           if all((art_root/style/name).is_file() for name in art_files)}
+    fingerprint = dict(format=2, version=version, source=botw_expected(version)['romfs']['sha256'],
+                       artwork={style: {name: sha256(folder/name) for name in art_files} for style, folder in art.items()},
                        generators={str(p.relative_to(tree.parent)): sha256(p) for p in files},
                        fonts=sha256(tree / 'extracted/firmware/shared-fonts/manifest.json'))
     try:
@@ -1697,7 +1702,8 @@ def step_button_icons_botw(tree, botw, logs, version):
         run([tree / '.venv/bin/python', botw / 'scripts/make_button_icons.py', target/style,
              '--romfs', tree / f'extracted/{version}/romfs',
              '--shared-fonts', tree / 'extracted/firmware/shared-fonts',
-             '--version', version, '--style', style, '--replace'], logs / f'button-icons-{version}-{style}.log', cwd=tree)
+             '--version', version, '--style', style, '--replace',
+             *(['--controller-art', art[style]] if style in art else [])], logs / f'button-icons-{version}-{style}.log', cwd=tree)
     (target / 'source.json').write_text(json.dumps(fingerprint, sort_keys=True) + '\n')
 
 
