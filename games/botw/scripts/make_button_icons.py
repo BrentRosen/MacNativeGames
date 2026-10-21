@@ -124,19 +124,25 @@ def patch_font(data, bitmaps):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('mod',type=Path);ap.add_argument('--app',type=Path,required=True)
+    ap.add_argument('mod',type=Path)
+    source=ap.add_mutually_exclusive_group(required=True)
+    source.add_argument('--app',type=Path);source.add_argument('--romfs',type=Path)
+    ap.add_argument('--shared-fonts',type=Path)
     ap.add_argument('--version',choices=('botw160','botw190'))
     ap.add_argument('--style',choices=sorted(icons.STYLES),default='xbox')
     ap.add_argument('--replace',action='store_true');ap.add_argument('--preview',type=Path)
     args=ap.parse_args();version=args.version or args.mod.name
     if version not in ('botw160','botw190'):ap.error('use a botw160/botw190 mod folder or --version')
-    root=args.app/'Contents/Resources/totk';romfs=root/f'extracted/{version}/romfs'
+    root=args.app/'Contents/Resources/totk' if args.app else None
+    romfs=args.romfs or root/f'extracted/{version}/romfs'
+    fonts=args.shared_fonts or (root/'extracted/firmware/shared-fonts' if root else None)
+    if not fonts:ap.error('--romfs requires --shared-fonts')
     index=read_index(romfs/'runtime-index.bin')
     names=[n for n in index if n.startswith('Font/Font_') and n.endswith('.sbfarc')]
     assert names, 'no BotW font archives'
     for n in names:
         if (args.mod/n).exists() and not args.replace:ap.error(f'{args.mod/n} exists; use --replace to change styles')
-    designs=icon_bitmaps((root/'extracted/firmware/shared-fonts/0-standard.bfttf').read_bytes(),args.style)
+    designs=icon_bitmaps((fonts/'0-standard.bfttf').read_bytes(),args.style)
     outputs={};cache={}
     with (romfs/'romfs.bin').open('rb') as f:
         for n in names:
@@ -147,11 +153,18 @@ def main():
             assert len(new)==len(archive), 'font archive grew: resource-size table would need updating'
             outputs[n]=literal_yaz0(new,raw)
             assert yaz0(outputs[n])==new
+    from controller_pictures import replace_bootup, verify_pack_budget
+    with (romfs/'romfs.bin').open('rb') as f:
+        offset,size=index['Pack/Bootup.pack'];f.seek(offset);boot=f.read(size)
+        offset,size=index['System/Resource/ResourceSizeTable.product.srsizetable'];f.seek(offset);verify_pack_budget(f.read(size))
+    if (args.mod/'Pack/Bootup.pack').exists() and not args.replace:
+        ap.error('a Controls picture mod already exists; use --replace to change styles')
+    outputs['Pack/Bootup.pack']=replace_bootup(boot,args.style)
     for n,data in outputs.items():
         target=args.mod/n;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
     lines,_,added,misspelt=manifest(args.mod,romfs);assert not added and not misspelt
     (args.mod/'manifest.tsv').write_text('# path\tsize\tsha256\toriginal_sha256\n'+'\n'.join(lines)+'\n')
     if args.preview:preview.save(args.preview)
-    print(f'{args.style}: {count} button icons in {len(outputs)} localized font archives; {args.mod}/manifest.tsv')
+    print(f'{args.style}: {count} button icons in {len(names)} localized font archives plus Controls pictures; {args.mod}/manifest.tsv')
 
 if __name__=='__main__':main()

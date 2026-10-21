@@ -123,6 +123,10 @@ void runtime_input_clear(void);
 int runtime_handheld_mode(void);   /* TOTK_OPERATION_MODE=handheld (runtime/services.c) */
 void *runtime_input_override(const char *name);
 typedef struct { uint64_t buttons; int32_t lx,ly,rx,ry; int connected; } RuntimeGamepadState;
+const char *runtime_gamepad_icon_style(void);
+int runtime_button_icons_choice(void);             /* Automatic, Switch, Xbox, PlayStation, Keyboard */
+int runtime_button_icons_set_choice(int choice);   /* save for next launch, 0 on failure */
+const char *runtime_button_icons_style(void);      /* resolved launch style */
 void runtime_gamepad_start(void);
 void runtime_gamepad_read(RuntimeGamepadState *out);
 /* Forget held buttons and sticks: macOS stops delivering controller events (including releases) while the app is in

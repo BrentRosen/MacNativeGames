@@ -221,6 +221,27 @@ static int folder_exists(const char *folder) {
 }
 /* The overlay slot + 1 that replaces RomFS file i, or 0. */
 static uint32_t overlay_slot(uint64_t i) {size_t lo=0,hi=noverlay;while(lo<hi){size_t m=lo+(hi-lo)/2;if(overlays[m].index<i)lo=m+1;else hi=m;}return lo<noverlay&&overlays[lo].index==i?(uint32_t)(lo+1):0;}
+#ifdef GAME_BOTW
+static void button_icons_init(const char *mods) {
+ const char *style=runtime_button_icons_style();
+ if(!strcmp(style,"switch")){fprintf(stderr,"[botw] Button icons: Switch (original assets)\n");return;}
+ char folder[4200],file[4300],line[8192],name[4096];
+ snprintf(folder,sizeof(folder),"extracted/" TOTK_GAME_DIR "/romfs-button-icons/%s",style);
+ snprintf(file,sizeof(file),"%s/manifest.tsv",folder);FILE *f=fopen(file,"r");
+ if(!f){fprintf(stderr,"[botw] Button icons: %s asset set missing; retaining original assets\n",style);return;}
+ if(mods&&*mods&&strcmp(mods,"0")){
+  char other[4300];snprintf(other,sizeof(other),"%s/manifest.tsv",mods);FILE *m=fopen(other,"r");
+  if(m){while(fgets(line,sizeof(line),f)){
+    if(line[0]=='#'||sscanf(line,"%4095[^\t]",name)!=1)continue;
+    rewind(m);char ml[8192];size_t n=strlen(name);
+    while(fgets(ml,sizeof(ml),m))if(ml[0]!='#'&&!strncmp(ml,name,n)&&ml[n]=='\t'){
+      fclose(m);fclose(f);fprintf(stderr,"[botw] Button icons: disabled because a mod replaces the same asset (%s)\n",name);return;
+    }
+   }fclose(m);}
+ }
+ fclose(f);overlay_load(folder,1,0);fprintf(stderr,"[botw] Button icons: %s\n",style);
+}
+#endif
 /* TOTK_ROMFS_PATCHES (default extracted/<version>/romfs-patches; 0 = none); with a true-2K output bigger than 1920x1080
    also <TOTK_ROMFS_PATCHES_OUT, default extracted/<version>/romfs-patches-out>/<w>x<h> (the HeapDef sizes,
    scripts/make_output_res_overlay.py); then the player's mods in TOTK_ROMFS_MODS (0 = none). */
@@ -235,7 +256,11 @@ static void overlay_init(void) {
   if(access(m,R_OK)){fprintf(stderr,"[totk] RomFS overlay %s missing: make it with\n  .venv/bin/python scripts/make_output_res_overlay.py %ux%u%s%s --version " TOTK_GAME_DIR "%s%s\n",d,w,h,*scene?" --scene ":"",*scene?scene+7:"",out?" --output-root ":"",out?out:"");
    runtime_fail("HeapDef overlay for this output / scene size missing (see the line above)");}
   overlay_load(d,1,0);}
- const char *mods=getenv("TOTK_ROMFS_MODS");if(mods&&*mods&&strcmp(mods,"0"))overlay_load(mods,0,1);
+ const char *mods=getenv("TOTK_ROMFS_MODS");
+#ifdef GAME_BOTW
+ button_icons_init(mods);
+#endif
+ if(mods&&*mods&&strcmp(mods,"0"))overlay_load(mods,0,1);
  added_init();
  if(noverlay)qsort(overlays,noverlay,sizeof(*overlays),overlay_order);
  for(size_t k=1;k<noverlay;k++)if(overlays[k].index==overlays[k-1].index){

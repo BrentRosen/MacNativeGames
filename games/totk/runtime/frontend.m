@@ -272,12 +272,47 @@ static TOTKWindowDelegate *windowDelegate;
 int runtime_front_window_visible(void){return atomic_load(&windowVisible);}
 void runtime_front_request_close(void){dispatch_async(dispatch_get_main_queue(), ^{[window performClose:nil];});}
 /* Use the window-close path, not terminate:, so Command-Q also waits for active saves. */
+#ifdef GAME_BOTW
+@interface TOTKButtonIconsMenu:NSObject<NSMenuDelegate>
+@end
+@implementation TOTKButtonIconsMenu
+-(void)choose:(NSMenuItem *)item {
+ if(!runtime_button_icons_set_choice((int)item.tag)) {
+  NSAlert *alert=[NSAlert new];alert.messageText=@(TOTK_UI("无法保存按键图标设置","Could not save button icons"));
+  alert.informativeText=@(TOTK_UI("请检查档案文件夹是否可写。","Check that the profile folder is writable."));[alert runModal];
+ }
+}
+-(void)menuNeedsUpdate:(NSMenu *)menu {
+ int selected=runtime_button_icons_choice();
+ for(NSMenuItem *item in menu.itemArray)if(item.action==@selector(choose:))item.state=item.tag==selected?NSControlStateValueOn:NSControlStateValueOff;
+}
+@end
+static TOTKButtonIconsMenu *buttonIconsMenu;
+static void front_button_icons_add(NSMenu *bar) {
+ buttonIconsMenu=[TOTKButtonIconsMenu new];
+ NSMenu *menu=[[NSMenu alloc] initWithTitle:@(TOTK_UI("按键图标","Button icons"))];
+ menu.delegate=buttonIconsMenu;menu.autoenablesItems=NO;
+ const char *names[]={TOTK_UI("自动","Automatic"),"Switch","Xbox","PlayStation",TOTK_UI("键盘","Keyboard")};
+ for(int i=0;i<5;i++){
+  NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:@(names[i]) action:@selector(choose:) keyEquivalent:@""];
+  item.target=buttonIconsMenu;item.tag=i;[menu addItem:item];
+ }
+ [menu addItem:NSMenuItem.separatorItem];
+ NSMenuItem *note=[[NSMenuItem alloc] initWithTitle:@(TOTK_UI("重启游戏后生效","Applies after restarting the game")) action:nil keyEquivalent:@""];
+ note.enabled=NO;[menu addItem:note];
+ NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:menu.title action:nil keyEquivalent:@""];item.submenu=menu;[bar addItem:item];
+}
+#endif
 static void front_install_menu(void){
  NSMenu *menu=[NSMenu new],*appMenu=[NSMenu new];
  NSMenuItem *appItem=[NSMenuItem new];appItem.submenu=appMenu;[menu addItem:appItem];
  NSMenuItem *quit=[[NSMenuItem alloc] initWithTitle:@(TOTK_UI("退出 " GAME_NAME,"Quit " GAME_NAME)) action:@selector(performClose:) keyEquivalent:@"q"];
  quit.keyEquivalentModifierMask=NSEventModifierFlagCommand;quit.target=window;
- [appMenu addItem:quit];front_menubar_fps_add(menu);NSApp.mainMenu=menu;
+ [appMenu addItem:quit];front_menubar_fps_add(menu);
+#ifdef GAME_BOTW
+ front_button_icons_add(menu);
+#endif
+ NSApp.mainMenu=menu;
 }
 static void *guest_main(void *callback){@autoreleasepool{((void(*)(void))callback)();}return NULL;}
 void runtime_front_run(void(*callback)(void)){

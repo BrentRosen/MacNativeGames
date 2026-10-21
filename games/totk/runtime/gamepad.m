@@ -13,6 +13,8 @@ static pthread_mutex_t gamepadLock = PTHREAD_MUTEX_INITIALIZER;
 static RuntimeGamepadState gamepadState;
 static uint64_t pressedEdges;
 static BOOL started;
+static dispatch_group_t initialGamepad;
+static BOOL initialGamepadReady;
 static uint16_t controllerMap[CONTROLLER_BUTTONS];
 static uint8_t controllerModes[CONTROLLER_BUTTONS];
 static uint64_t physicalPrev;
@@ -50,6 +52,31 @@ static int32_t stick_axis(float value) {
 static int32_t stronger_axis(int32_t a, int32_t b) {
     return abs(b) > abs(a) ? b : a;
 }
+
+/* The connected-controller list can be empty until the main run loop delivers its initial notifications.
+   RomFS initializes on the guest thread before that happens. Wait for the first extended pad (at most 1.5 s),
+   leaving the main thread free to deliver discovery. Manual styles never call this function. */
+const char *runtime_gamepad_icon_style(void) {
+    @autoreleasepool {
+        if (started && !NSThread.isMainThread)
+            dispatch_group_wait(initialGamepad, dispatch_time(DISPATCH_TIME_NOW, 1500 * NSEC_PER_MSEC));
+        __block const char *style = "keyboard";
+        void (^select)(void) = ^{
+            for (GCController *controller in GCController.controllers) {
+                if (!controller.extendedGamepad) continue;
+                if ([controller.extendedGamepad isKindOfClass:GCDualSenseGamepad.class] ||
+                    [controller.extendedGamepad isKindOfClass:GCDualShockGamepad.class]) style = "playstation";
+                else style = gamepad_icon_style(controller.productCategory.UTF8String, controller.vendorName.UTF8String);
+                break;
+            }
+        };
+        if (started && !NSThread.isMainThread) dispatch_sync(dispatch_get_main_queue(), select);
+        else select();  /* Headless probes have no UI run loop. */
+        fprintf(stderr, "[totk-input] Automatic button icons: %s\n", style);
+        return style;
+    }
+}
+
 
 static int face_by_position(GCController *controller) {
     return gamepad_face_by_position(controller.productCategory.UTF8String, controller.vendorName.UTF8String);
@@ -138,6 +165,10 @@ static void attach_gamepad(GCController *controller) {
     fprintf(stderr, "[totk-input] native gamepad connected: %s (%s), face buttons by %s\n",
             (controller.vendorName ?: @"unknown").UTF8String,
             (controller.productCategory ?: @"unknown").UTF8String, face_by_position(controller) ? "position" : "label");
+    if (!initialGamepadReady && initialGamepad) {
+        initialGamepadReady = YES;
+        dispatch_group_leave(initialGamepad);
+    }
     runtime_feedback_attach(controller);
     refresh_gamepads();
 }
@@ -145,6 +176,8 @@ static void attach_gamepad(GCController *controller) {
 void runtime_gamepad_start(void) {
     if (started) return;
     started = YES;
+    initialGamepad = dispatch_group_create();
+    dispatch_group_enter(initialGamepad);
     load_controller_map();
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
     [center addObserverForName:GCControllerDidConnectNotification object:nil queue:NSOperationQueue.mainQueue
@@ -193,4 +226,33 @@ void runtime_gamepad_read(RuntimeGamepadState *out) {
     if (touchState.connected) out->connected = 1;
     pressedEdges = 0;
     pthread_mutex_unlock(&gamepadLock);
+}
+
+/* Saved outside the game save, in the active profile, so private test profiles remain isolated. */
+static NSString *button_icons_path(void) {
+    const char *profile = getenv("TOTK_PROFILE_DIR");
+    return [@(profile && *profile ? profile : "user-data") stringByAppendingPathComponent:@"button-icons-style"];
+}
+static const char *const icon_choices[] = {"automatic", "switch", "xbox", "playstation", "keyboard"};
+int runtime_button_icons_choice(void) {
+    NSString *value = [NSString stringWithContentsOfFile:button_icons_path() encoding:NSUTF8StringEncoding error:nil];
+    value = [value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    for (int i=0;i<5;i++) if ([value isEqualToString:@(icon_choices[i])]) return i;
+    return 0;
+}
+int runtime_button_icons_set_choice(int choice) {
+    if (choice<0 || choice>=5) return 0;
+    NSString *path=button_icons_path();NSError *error=nil;
+    if (![NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent
+          withIntermediateDirectories:YES attributes:nil error:&error] ||
+        ![@(icon_choices[choice]) writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
+        fprintf(stderr,"[totk] Button icons: cannot save choice: %s\n",error.localizedDescription.UTF8String);
+        return 0;
+    }
+    fprintf(stderr,"[totk] Button icons: saved %s (next launch)\n",icon_choices[choice]);
+    return 1;
+}
+const char *runtime_button_icons_style(void) {
+    int choice=runtime_button_icons_choice();
+    return choice ? icon_choices[choice] : runtime_gamepad_icon_style();
 }

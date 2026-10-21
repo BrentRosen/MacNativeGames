@@ -1262,7 +1262,7 @@ def step_app(tree, out, logs, *, version="v0", game='totk'):
     for rel in files:
         clone(tree / rel, res / rel)
     clone(tree / 'prebuilt/macos-arm64/totk_xlate', res / 'build/shader-service/totk_xlate')   # where totk_shader_rt.m looks for it
-    for rel in (f'extracted/{version}/romfs-patches', f'extracted/{version}/romfs-patches-out', 'extracted/firmware/shared-fonts'):
+    for rel in (f'extracted/{version}/romfs-patches', f'extracted/{version}/romfs-patches-out', f'extracted/{version}/romfs-button-icons', 'extracted/firmware/shared-fonts'):
         if (tree / rel).is_dir():   # Breath of the Wild has no RomFS overlays
             copy_tree(tree / rel, res / rel)
     seed = tree/f'build/shader-seed/{version}'
@@ -1671,6 +1671,36 @@ def step_data_botw(tree, botw, game, keys, logs, *, version='botw160', update=No
         validate_fonts(fonts)
 
 
+def step_button_icons_botw(tree, botw, logs, version):
+    """All prompt/picture styles from player data, reused only when source and output hashes agree."""
+    target = tree / f'extracted/{version}/romfs-button-icons'
+    files = [botw / 'scripts/make_button_icons.py', botw / 'scripts/controller_pictures.py',
+             tree / 'scripts/make_button_icons.py', tree / 'scripts/controller_artwork.py']
+    fingerprint = dict(format=1, version=version, source=botw_expected(version)['romfs']['sha256'],
+                       generators={str(p.relative_to(tree.parent)): sha256(p) for p in files},
+                       fonts=sha256(tree / 'extracted/firmware/shared-fonts/manifest.json'))
+    try:
+        ready = json.loads((target / 'source.json').read_text()) == fingerprint
+        for style in ('xbox', 'playstation', 'keyboard'):
+            rows = [line.split('\t') for line in (target / style / 'manifest.tsv').read_text().splitlines()
+                    if line and not line.startswith('#')]
+            ready = ready and len(rows) == 8 and all(
+                (target/style/name).stat().st_size == int(size) and sha256(target/style/name) == digest
+                for name, size, digest, _ in rows)
+        if ready:
+            say('2/4 data: button icon and Controls picture sets unchanged')
+            return
+    except (OSError, ValueError):
+        pass
+    say('2/4 data: Switch / Xbox / PlayStation / Keyboard / Automatic icons and Controls pictures')
+    for style in ('xbox', 'playstation', 'keyboard'):
+        run([tree / '.venv/bin/python', botw / 'scripts/make_button_icons.py', target/style,
+             '--romfs', tree / f'extracted/{version}/romfs',
+             '--shared-fonts', tree / 'extracted/firmware/shared-fonts',
+             '--version', version, '--style', style, '--replace'], logs / f'button-icons-{version}-{style}.log', cwd=tree)
+    (target / 'source.json').write_text(json.dumps(fingerprint, sort_keys=True) + '\n')
+
+
 def step_shaders_botw(tree, botw, logs, *, version='botw160'):
     """SPIRV-Cross and the translator as for Tears of the Kingdom; the startup seed from this game's archives and its
     shared shader list (games/botw/scripts/prepare_shader_seed.py, games/botw/assets/shader_list.tsv)."""
@@ -1818,6 +1848,7 @@ def main(argv):
         say(f'Breath of the Wild {expected["display_version"]}; work folder {work}')
         step_code_botw(tree, botw, update or game, keys, env, logs, version=version)
         step_data_botw(tree, botw, game, keys, logs, version=version, update=update, dlc=dlcs, firmware=firmware, shared_fonts=shared_fonts)
+        step_button_icons_botw(tree, botw, logs, version)
         step_shaders_botw(tree, botw, logs, version=version)
         step_shader_libs(tree, logs, version=version)
         # The work folder's copy of games/botw (prepare_work), relative: make splits a path with spaces into several targets
