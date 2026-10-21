@@ -313,8 +313,6 @@ def main():
     if patched.is_file():
         sources['-patched'] = patched.read_bytes()
     pictures = {}
-    product_images = {style: controller_pictures.load_controller_artwork(style, args.output.parent / 'controller-artwork')
-                      for style in controller_pictures.PRODUCT_ARTWORK}
     for suffix, source in sources.items():
         info = zstd.get_frame_info(source)
         dic = romfs.dictionaries.get(info.dictionary_id)
@@ -322,12 +320,16 @@ def main():
         members = sarc_members(archive)
         texture = archive[slice(*members['timg/__Combined.bntx'])]
         layout_name = 'blyt/PaSystemController_00.bflyt'
-        layout = controller_pictures.replace_callouts(archive[slice(*members[layout_name])])
-        assert all(b'N_Line_00' not in archive[lo:hi] for name,(lo,hi) in members.items()
-                   if name.startswith('anim/PaSystemController_00') and name.endswith('.bflan')), 'connector parent is animated'
         for style in STYLES:
-            out = sarc_replace(archive, {'timg/__Combined.bntx': controller_pictures.replace_textures(texture, style, product_images.get(style)),
-                                         layout_name: layout})
+            layout, edits = controller_pictures.replace_callouts(archive[slice(*members[layout_name])], style,
+                                                                archive[slice(*members['blyt/PaController_00.bflyt'])])
+            replacements = {'timg/__Combined.bntx': controller_pictures.replace_textures(texture, style),
+                            layout_name: layout}
+            for name,(lo,hi) in members.items():
+                if name.startswith('anim/PaSystemController_00') and name.endswith('.bflan'):
+                    animation = controller_pictures.replace_callout_animation(archive[lo:hi], edits, style)
+                    if animation != archive[lo:hi]: replacements[name] = animation
+            out = sarc_replace(archive, replacements)
             assert len(out) == len(archive), 'controller replacement grew the UI archive'
             pictures[style + suffix] = (romfs.pack(out, dic), hashlib.sha256(source).hexdigest())
 
@@ -349,7 +351,6 @@ def main():
                                              + '\n'.join(lines) + '\n')
         print(f'{folder}: {len(lines)} files')
     args.output.mkdir(parents=True, exist_ok=True)
-    (args.output / 'artwork-source.json').write_text(json.dumps(controller_pictures.PRODUCT_ARTWORK, indent=2) + '\n')
     write(args.output / 'menu', files)
     for style, blob in fonts.items():
         write(args.output / f'icons-{style}', {icons.ARCHIVE: blob})

@@ -21,16 +21,3 @@ Fetched or linked at build time (not in this repository):
 | [hactool](https://github.com/SciresM/hactool) at `1d64a83` (with explicit private title-key-file hook), including its bundled mbedTLS | Base + update BKTR merge at build time only | ISC (hactool), Apache-2.0 (mbedTLS); see fetched source LICENSE files |
 | libopus (Homebrew), linked statically | Opus audio | BSD-3-Clause |
 | libvpx (Homebrew), linked statically | VP9 movies | BSD-3-Clause |
-
-## Controller product artwork fetched at build time
-
-Controls-screen pictures use the official front-facing product renders from:
-
-- [Microsoft Store: Carbon Black Xbox Wireless Controller](https://www.microsoft.com/en-us/d/xbox-wireless-controller/8xn59crbsqgz).
-- [PlayStation: white DualSense wireless controller](https://www.playstation.com/en-us/accessories/dualsense-wireless-controller/).
-
-The images and trademarks belong to Microsoft and Sony Interactive Entertainment respectively and are not covered by
-this repository’s MIT license. Product images are fetched from the manufacturers’ CDNs into an ignored local build
-cache, checked against the SHA-256 values in `controller_pictures.py`, and fitted to the game’s texture canvas. The
-images themselves are not included in this repository. Generated overlays record their source URLs and checksums in
-`artwork-source.json`.
