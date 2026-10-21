@@ -4,6 +4,7 @@ from pathlib import Path
 import plistlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT=Path(__file__).resolve().parents[1]/'games/totk/tools/install_desktop_entry.py'
 spec=importlib.util.spec_from_file_location('desktop_entry_installer',SCRIPT)
@@ -24,6 +25,25 @@ class DesktopEntryTests(unittest.TestCase):
 
     def install(self):
         return installer.install(self.app,self.desktop,self.data,register=False)
+
+    def test_botw_defaults_use_its_own_desktop_link_and_data_folder(self):
+        (self.app/'Contents/MacOS/TOTK').rename(self.app/'Contents/MacOS/BotW')
+        (self.app/'Contents/Info.plist').write_bytes(plistlib.dumps(dict(
+            CFBundleIdentifier='org.macnativegames.botw', CFBundleExecutable='BotW', CFBundleShortVersionString='1.9.0')))
+        before=installer.manifest(self.app)
+        with patch.object(Path,'home',return_value=self.root):
+            result=installer.install(self.app,register=False)
+        link=self.root/'Desktop/Breath of the Wild  Mac.app'
+        self.assertEqual(link.resolve(),self.app.resolve())
+        self.assertEqual(result['profile'],str(self.root.resolve()/'Library/Application Support/MacNativeGames/BotW/profile'))
+        self.assertFalse((self.root/'Library/Application Support/MacNativeGames/TOTK').exists())
+        self.assertEqual(installer.manifest(self.app),before)
+
+    def test_totk_default_paths_remain_unchanged(self):
+        with patch.object(Path,'home',return_value=self.root):
+            result=installer.install(self.app,register=False)
+        self.assertEqual(result['desktop'],str(self.root/'Desktop/Tears of the Kingdom  Mac.app'))
+        self.assertEqual(result['profile'],str(self.root.resolve()/'Library/Application Support/MacNativeGames/TOTK/profile'))
 
     def test_migration_preserves_source_and_sealed_app(self):
         before=installer.manifest(self.app);legacy=installer.manifest(self.legacy)

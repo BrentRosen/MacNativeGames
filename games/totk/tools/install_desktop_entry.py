@@ -11,6 +11,10 @@ import subprocess
 import sys
 
 BUNDLE_ID = 'org.macnativegames.totk'
+APPS = {
+    BUNDLE_ID: ('Tears of the Kingdom', 'TOTK'),
+    'org.macnativegames.botw': ('Breath of the Wild', 'BotW'),
+}
 LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
 
 
@@ -23,11 +27,15 @@ def manifest(folder):
     return result
 
 
-def install(app, desktop, data, register=True):
-    app, data = app.resolve(), data.resolve()
+def install(app, desktop=None, data=None, register=True):
+    app = app.resolve()
     info = plistlib.loads((app/'Contents/Info.plist').read_bytes())
-    if info.get('CFBundleIdentifier') != BUNDLE_ID or not (app/'Contents/MacOS'/info['CFBundleExecutable']).is_file():
-        raise ValueError('requires the packaged MacNativeGames TOTK app')
+    game = APPS.get(info.get('CFBundleIdentifier'))
+    if not game or not (app/'Contents/MacOS'/info.get('CFBundleExecutable', '')).is_file():
+        raise ValueError('requires a packaged MacNativeGames TOTK or BotW app')
+    name, folder = game
+    desktop = desktop if desktop is not None else Path.home()/'Desktop'/f'{name}  Mac.app'
+    data = (data if data is not None else Path.home()/'Library/Application Support/MacNativeGames'/folder).resolve()
     data.mkdir(parents=True, exist_ok=True)
     report = dict(app=str(app), desktop=str(desktop), version=info['CFBundleShortVersionString'],
                   profile=str(data/'profile'), status='already-linked')
@@ -84,8 +92,8 @@ def install(app, desktop, data, register=True):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--app', type=Path, required=True)
-    parser.add_argument('--desktop', type=Path, default=Path.home()/'Desktop/Tears of the Kingdom  Mac.app')
-    parser.add_argument('--data', type=Path, default=Path.home()/'Library/Application Support/MacNativeGames/TOTK')
+    parser.add_argument('--desktop', type=Path, help='desktop link path (default: selected game name)')
+    parser.add_argument('--data', type=Path, help='data folder (default: selected game under Application Support/MacNativeGames)')
     args = parser.parse_args()
     print(json.dumps(install(args.app, args.desktop, args.data), indent=2))
 
