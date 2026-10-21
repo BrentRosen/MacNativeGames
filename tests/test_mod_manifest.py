@@ -68,6 +68,15 @@ def run(*args):
 
 
 class ModManifest(unittest.TestCase):
+    def test_botw_dlc_manifest_uses_the_selected_volume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);app=root/'BotW.app';mod=root/'dlc-mod'
+            fake_romfs(app/'Contents/Resources/totk/extracted/botw190/aoc/1', {'Added/Existing.bin': b'dlc-original'})
+            (mod/'Added').mkdir(parents=True);(mod/'Added/Existing.bin').write_bytes(b'dlc-modified')
+            result=run(mod,'--app',app,'--version','botw190','--aoc-index',1)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertIn(hashlib.sha256(b'dlc-original').hexdigest(),(mod/'manifest.tsv').read_text())
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)

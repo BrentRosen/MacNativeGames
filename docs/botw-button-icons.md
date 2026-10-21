@@ -74,3 +74,11 @@ are part of the build cache, so changing an image regenerates the affected sets 
 
 The standalone generator also accepts `--controller-art <style-folder>`. This personal artwork is used only
 on the local machine; downloaded mod assets are not checked into the repository.
+
+## Custom merged icon sets
+
+`TOTK_BUTTON_ICONS=/path/to/sets` selects manifests at `<root>/<style>/manifest.tsv`, including `switch`.
+`TOTK_BUTTON_ICONS=0` disables the overlay. The launcher also discovers a `button-icons/` directory beside the
+profile in the selected data folder. Each custom style must contain a complete, correctly merged pack when a
+mod changes Bootup game data; a missing manifest or a collision with a player mod stops startup. This avoids
+silently replacing mod game data with a vanilla controller-picture pack.

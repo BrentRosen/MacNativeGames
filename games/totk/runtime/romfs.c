@@ -223,11 +223,15 @@ static int folder_exists(const char *folder) {
 static uint32_t overlay_slot(uint64_t i) {size_t lo=0,hi=noverlay;while(lo<hi){size_t m=lo+(hi-lo)/2;if(overlays[m].index<i)lo=m+1;else hi=m;}return lo<noverlay&&overlays[lo].index==i?(uint32_t)(lo+1):0;}
 #ifdef GAME_BOTW
 static void button_icons_init(const char *mods) {
- const char *style=runtime_button_icons_style();
- if(!strcmp(style,"switch")){fprintf(stderr,"[botw] Button icons: Switch (original assets)\n");return;}
+ const char *style=runtime_button_icons_style(),*custom=getenv("TOTK_BUTTON_ICONS");
+ if(custom&&!*custom)custom=NULL;
+ if(custom&&!strcmp(custom,"0"))return;
+ if(!custom&&!strcmp(style,"switch")){fprintf(stderr,"[botw] Button icons: Switch (original assets)\n");return;}
  char folder[4200],file[4300],line[8192],name[4096];
- snprintf(folder,sizeof(folder),"extracted/" TOTK_GAME_DIR "/romfs-button-icons/%s",style);
+ if(custom)need(snprintf(folder,sizeof(folder),"%s/%s",custom,style)<(int)sizeof(folder),"Button icons custom path");
+ else snprintf(folder,sizeof(folder),"extracted/" TOTK_GAME_DIR "/romfs-button-icons/%s",style);
  snprintf(file,sizeof(file),"%s/manifest.tsv",folder);FILE *f=fopen(file,"r");
+ if(!f&&custom)runtime_fail("custom Button icons asset set missing");
  if(!f){fprintf(stderr,"[botw] Button icons: %s asset set missing; retaining original assets\n",style);return;}
  if(mods&&*mods&&strcmp(mods,"0")){
   char other[4300];snprintf(other,sizeof(other),"%s/manifest.tsv",mods);FILE *m=fopen(other,"r");
@@ -235,7 +239,7 @@ static void button_icons_init(const char *mods) {
     if(line[0]=='#'||sscanf(line,"%4095[^\t]",name)!=1)continue;
     rewind(m);char ml[8192];size_t n=strlen(name);
     while(fgets(ml,sizeof(ml),m))if(ml[0]!='#'&&!strncmp(ml,name,n)&&ml[n]=='\t'){
-      fclose(m);fclose(f);fprintf(stderr,"[botw] Button icons: disabled because a mod replaces the same asset (%s)\n",name);return;
+      fclose(m);fclose(f);if(custom)runtime_fail("custom Button icons assets conflict with a player mod");fprintf(stderr,"[botw] Button icons: disabled because a mod replaces the same asset (%s)\n",name);return;
     }
    }fclose(m);}
  }
@@ -352,8 +356,10 @@ void runtime_fs_probe(void) {
  /* Audio stream paths include an extra slash after the mount root. Verify
     actual resource lookup and bytes, while still rejecting path traversal. */
  {
-  const char *name="Sound/Resource/Stream/Dm_OP_0001.bwav";
-  char path[256];uint8_t expected[257],actual[257];uint64_t h,n;
+  const char *name=NULL;
+  for(uint64_t i=0;i<file_count;i++){Entry e=entry(i);const char *candidate=entry_name(e);if(!strncmp(candidate,"Sound/Resource/Stream/",22)&&e.size>=257){name=candidate;break;}}
+  need(name!=NULL,"find audio stream for probe");
+  char path[4096];uint8_t expected[257],actual[257];uint64_t h,n;
   snprintf(path,sizeof path,"rom:/%s",name);
   need(!runtime_romfs_open(&h,path,1),"open normal audio path");
   need(!runtime_romfs_read(&n,h,0,expected,sizeof expected)&&n==sizeof expected,"read normal audio path");runtime_romfs_close(h);
@@ -365,7 +371,8 @@ void runtime_fs_probe(void) {
   }
   need(runtime_romfs_open(&h,"rom://../Sound/Resource/Stream/Dm_OP_0001.bwav",1)!=0,"reject traversal after repeated root separator");
  }
- for(uint64_t i=0;i<file_count;i+=file_count/64){Entry e=entry(i);char p[4096];need(snprintf(p,sizeof(p),"rom:/%s",entry_name(e))<(int)sizeof(p),"probe path");uint64_t h=0,n=0;int64_t size;need(!runtime_romfs_open(&h,p,1)&&!runtime_romfs_size(&size,h)&&(uint64_t)size==e.size,"probe open/size");need(!runtime_romfs_read(&n,h,0,buffer,sizeof(buffer)),"probe partial read");for(uint64_t j=0;j<n;j++)sum=sum*131+buffer[j];need(!runtime_romfs_read(&n,h,size,buffer,1)&&n==0,"probe EOF");runtime_romfs_close(h);count++;}
+ uint64_t step=file_count/64;if(!step)step=1;
+ for(uint64_t i=0;i<file_count;i+=step){Entry e=entry(i);uint32_t ov=overlay_slot(i);uint64_t expected_size=ov?overlays[ov-1].size:e.size;char p[4096];need(snprintf(p,sizeof(p),"rom:/%s",entry_name(e))<(int)sizeof(p),"probe path");uint64_t h=0,n=0;int64_t size;need(!runtime_romfs_open(&h,p,1)&&!runtime_romfs_size(&size,h)&&(uint64_t)size==expected_size,"probe open/size");need(!runtime_romfs_read(&n,h,0,buffer,sizeof(buffer)),"probe partial read");for(uint64_t j=0;j<n;j++)sum=sum*131+buffer[j];need(!runtime_romfs_read(&n,h,size,buffer,1)&&n==0,"probe EOF");runtime_romfs_close(h);count++;}
  for(size_t k=0;k<noverlay;k++){char p[4096];need(snprintf(p,sizeof(p),"rom:/%s",overlays[k].name)<(int)sizeof(p),"probe overlay path");
   if(overlays[k].index>=file_count){int type=-1;char *slash=strchr(overlays[k].name,'/')?strrchr(p,'/'):NULL;
    if(slash){*slash=0;need(!runtime_romfs_entry_type(&type,p)&&type==0,"probe added file's folder");*slash='/';}

@@ -1680,7 +1680,7 @@ def step_button_icons_botw(tree, botw, logs, version):
     art_files = ('front.png', 'rear.png', 'layout.json')
     art = {style: art_root/style for style in ('xbox', 'playstation', 'keyboard')
            if all((art_root/style/name).is_file() for name in art_files)}
-    fingerprint = dict(format=2, version=version, source=botw_expected(version)['romfs']['sha256'],
+    fingerprint = dict(format=2, version=version, source=VERSIONS[version]['romfs']['sha256'],
                        artwork={style: {name: sha256(folder/name) for name in art_files} for style, folder in art.items()},
                        generators={str(p.relative_to(tree.parent)): sha256(p) for p in files},
                        fonts=sha256(tree / 'extracted/firmware/shared-fonts/manifest.json'))

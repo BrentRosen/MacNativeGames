@@ -175,14 +175,20 @@ int main(int argc, char **argv) {
             return 1;
         }
         NSString *home = NSHomeDirectory();
-        NSString *data = [home stringByAppendingPathComponent:@"Library/Application Support/MacNativeGames/" GAME_FOLDER];   /* game_version.h: TOTK, BotW */
+        /* An optional bundle-specific data folder keeps experimental mod editions on their own saves.
+           It is a single folder name; environment overrides below still support private QA profiles. */
+        NSString *folder = [NSBundle.mainBundle objectForInfoDictionaryKey:@"MNGDataFolder"];
+        if (![folder isKindOfClass:NSString.class] || !folder.length || [folder isEqualToString:@"."] ||
+            [folder isEqualToString:@".."] || [folder rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"/:"]].location != NSNotFound)
+            folder = @GAME_FOLDER;
+        NSString *data = [[home stringByAppendingPathComponent:@"Library/Application Support/MacNativeGames"] stringByAppendingPathComponent:folder];
         NSString *logs = [home stringByAppendingPathComponent:@"Library/Logs/MacNativeGames"];
         /* Folders the environment already names are kept (open --env TOTK_PROFILE_DIR=... runs a test on a save copy,
            TOTK_GAME_SLOT_DIR shares one game slot with another build of the game: one game at a time on the Mac). */
         NSString *(^env_or)(const char *, NSString *) = ^NSString *(const char *name, NSString *fallback) {
             const char *v = getenv(name); return v && *v ? @(v) : fallback; };
         NSString *profile = env_or("TOTK_PROFILE_DIR", [data stringByAppendingPathComponent:@"profile"]);
-        NSString *slot = env_or("TOTK_GAME_SLOT_DIR", [data stringByAppendingPathComponent:@"game-slot"]);
+        NSString *slot = env_or("TOTK_GAME_SLOT_DIR", [home stringByAppendingPathComponent:@"Library/Application Support/MacNativeGames/" GAME_FOLDER "/game-slot"]);
         NSString *cache = env_or("TOTK_SHADER_CACHE", [data stringByAppendingPathComponent:[NSString stringWithFormat:@"shader-cache/rt-%s", DMSH_CHAIN]]);
         if (!make_dir(profile) || !make_dir(slot) || !make_dir(cache) || !make_dir(logs)) {
             show_error([NSString stringWithFormat:@"Cannot create %@.", data]);
@@ -230,6 +236,12 @@ int main(int argc, char **argv) {
         setenv("TOTK_SHARED_FONTS", "extracted/firmware/shared-fonts", 1);
         /* Player mods (runtime/romfs.c): <data>/mods/<version>/manifest.tsv, when present. */
         setenv("TOTK_ROMFS_MODS", [data stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR].fileSystemRepresentation, 0);
+#ifdef GAME_BOTW
+        NSString *icons = [data stringByAppendingPathComponent:@"button-icons"];
+        BOOL iconsDirectory = NO;
+        if ([NSFileManager.defaultManager fileExistsAtPath:icons isDirectory:&iconsDirectory] && iconsDirectory)
+            setenv("TOTK_BUTTON_ICONS", icons.fileSystemRepresentation, 0);
+#endif
         /* The game's language (runtime/services.c): the app's first preferred language, which also follows a per-app
            language (defaults write org.macnativegames.totk AppleLanguages -array pt-BR). TOTK_LANG still overrides it. */
         NSString *preferred = NSLocale.preferredLanguages.firstObject;

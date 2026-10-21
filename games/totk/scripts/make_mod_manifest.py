@@ -314,6 +314,7 @@ def main():
     parser.add_argument('--check', action='store_true',
                         help='check the folder and say what the manifest would hold; write nothing (build_app.py runs '
                              'this before it replaces a player\'s mod folder)')
+    parser.add_argument('--aoc-index', type=int, choices=(1, 2), help='BotW DLC volume to bind this manifest to (with --app)')
     args = parser.parse_args()
     version = args.version or (args.mod.resolve().name if args.mod.resolve().name in APP_VERSIONS else None)
     romfs = args.romfs
@@ -321,6 +322,12 @@ def main():
         if not version:
             parser.error('name the game version with --version (or name the mod folder v0, v112, v121, v143, botw160 or botw190)')
         romfs = args.app/f'Contents/Resources/totk/extracted/{version}/romfs'
+        if args.aoc_index:
+            if version not in ('botw160', 'botw190'):
+                parser.error('--aoc-index requires a BotW game version')
+            romfs = args.app/f'Contents/Resources/totk/extracted/{version}/aoc/{args.aoc_index}'
+    elif args.aoc_index:
+        parser.error('--aoc-index requires --app; --romfs can point directly at a DLC image folder')
     for need in ('romfs.bin', 'runtime-index.bin'):
         if not (romfs/need).is_file():
             parser.error(f'{romfs/need} not found')

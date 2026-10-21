@@ -261,6 +261,33 @@ Check `grep "mods/botw160 checked" ~/Library/Logs/MacNativeGames/botw.log | tail
   `en-US`). To give only this game another language:
   `defaults write org.macnativegames.botw AppleLanguages -array en-US`.
 
+### BotW DLC overlays
+
+BotW builds with DLC-overlay support keep base and add-on files in separate folders. For a 1.9.0 app:
+
+```text
+~/Library/Application Support/MacNativeGames/BotW/mods/botw190/         (base-game files)
+~/Library/Application Support/MacNativeGames/BotW/mods/botw190-aoc/1/   (DLC pack 1 files)
+~/Library/Application Support/MacNativeGames/BotW/mods/botw190-aoc/2/   (DLC pack 2 files)
+```
+
+Each populated folder needs its own manifest. For DLC pack 1, run:
+
+```sh
+python3.14 games/totk/scripts/make_mod_manifest.py \
+  "$HOME/Library/Application Support/MacNativeGames/BotW/mods/botw190-aoc/1" \
+  --app "/Applications/Breath of the Wild.app" --version botw190 --aoc-index 1
+```
+
+Use `botw160` for 1.6.0. The manifest binds replacements to that DLC volume's original bytes; a final `-`
+adds a new DLC file. The runtime checks hashes, regular-file identity, duplicate names and relative paths,
+and refuses files changed during play. Added files and their parent folders are visible to the game.
+`TOTK_AOC_MODS` can name the folder containing `1/` and `2/`; `0` disables DLC mods. Otherwise the runtime
+uses `<TOTK_ROMFS_MODS>-aoc`. DLC mods do not change the base-game overlay namespace.
+
+BNP packages must first be merged/exported by a compatible mod manager: their `logs/` entries are patches,
+not game files. Mod compatibility with a game version still needs checking after a successful merge.
+
 ### Notes
 
 - Do not edit `manifest.tsv` by hand; regenerate it.
