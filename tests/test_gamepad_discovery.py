@@ -16,7 +16,7 @@ class GamepadDiscoveryTests(unittest.TestCase):
             probe = Path(tmp) / 'probe'
             build = subprocess.run(['xcrun', 'clang', '-std=gnu11', '-fobjc-arc', '-Wall', '-Wextra', '-Werror',
                                     str(TOTK / 'tests/gamepad_discovery/probe.m'), '-framework', 'Foundation',
-                                    '-framework', 'GameController', '-o', str(probe)], capture_output=True, text=True)
+                                    '-framework', 'GameController', '-framework', 'IOKit', '-o', str(probe)], capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             for style in ('xbox', 'playstation', 'switch', 'keyboard'):
                 with self.subTest(style=style):

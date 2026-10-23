@@ -13,8 +13,10 @@ Styles:
             + - = Enter Tab, left stick = W A S D, right stick = arrow keys, stick presses = Z C, d-pad = T F G H.
   xbox      the buttons in the place a controller presses them (controllers follow the Switch's physical layout):
             A B X Y = B A Y X, L R = LB RB, ZL ZR = LT RT, + - = Menu and View, the d-pad as a cross.
-  playstation  the same places: A B X Y = circle, cross, triangle, square, L R = L1 R1, ZL ZR = L2 R2, + - = Options and
-            Create, the d-pad as a cross.
+  playstation  DualSense / DualShock symbols by position like xbox: A B X Y = Circle Cross Triangle Square,
+            L R = L1 R1, ZL ZR = L2 R2, + - = Options and Create, the d-pad as a cross.
+  playstation-label  the same, but A B X Y = Cross Circle Square Triangle, for TOTK_FACE_BUTTONS=label or a
+            controls.txt with south = a, east = b, west = x, north = y.
 Prompts drawn as fixed images (some tutorial animations) keep the Switch icons: they are not glyphs of this font.
 
 Format notes (checked on 1.0.0 and 1.2.1): a .bfotf is an OpenType (CFF) font with an 8-byte header, XOR-ed with a
@@ -305,7 +307,9 @@ def ps_symbol(pen, symbol, cx, cy, r):
         polygon(pen, pts)                        # clockwise: a hole
 
 
-def playstation_style(g):
+def playstation_style(g, by_label=False):
+    """DualSense / DualShock symbols. By position (the default mapping): A B X Y = Circle Cross Triangle Square.
+    by_label (TOTK_FACE_BUTTONS=label, or controls.txt south = a, east = b, west = x, north = y): Cross Circle Square Triangle."""
     def face(symbol, advance=640):
         def draw(pen):
             circle(pen, advance / 2, CY, R); ps_symbol(pen, symbol, advance / 2, CY, R)
@@ -332,15 +336,17 @@ def playstation_style(g):
                 rounded(reverse, advance / 2 + dx - 26, CY - 30, advance / 2 + dx + 26, CY + 120, 26)
         return advance, draw
     dpad = xbox_style(g)
+    a, b, x, y = ('cross', 'circle', 'square', 'triangle') if by_label else ('circle', 'cross', 'triangle', 'square')
     return {
-        0xE040: face('circle'), 0xE041: face('cross'), 0xE042: face('triangle'), 0xE043: face('square'),
+        0xE040: face(a), 0xE041: face(b), 0xE042: face(x), 0xE043: face(y),
         0xE044: bumper('L1'), 0xE045: bumper('R1'), 0xE046: trigger('L2'), 0xE047: trigger('R2'),
         0xE04B: options(), 0xE04C: create(),
         **{cp: dpad[cp] for cp in (0xE049, 0xE060, 0xE061, 0xE062, 0xE063, 0xE064, 0xE065)},
     }
 
 
-STYLES = {'keyboard': keyboard_style, 'xbox': xbox_style, 'playstation': playstation_style}
+STYLES = {'keyboard': keyboard_style, 'xbox': xbox_style, 'playstation': playstation_style,
+          'playstation-label': lambda g: playstation_style(g, by_label=True)}
 
 def redraw(otf, text_fonts, style):
     font = TTFont(io.BytesIO(otf))
