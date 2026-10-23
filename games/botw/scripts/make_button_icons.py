@@ -168,8 +168,8 @@ def main():
     outputs['Pack/Bootup.pack']=replace_bootup(boot,args.style,args.controller_art)
     for n,data in outputs.items():
         target=args.mod/n;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
-    lines,_,added,misspelt=manifest(args.mod,romfs);assert not added and not misspelt
-    (args.mod/'manifest.tsv').write_text('# path\tsize\tsha256\toriginal_sha256\n'+'\n'.join(lines)+'\n')
+    found=manifest(args.mod,romfs);assert not found.added and not found.misspelt   # a Manifest record, read by name
+    (args.mod/'manifest.tsv').write_text('# path\tsize\tsha256\toriginal_sha256\n'+'\n'.join(found.lines)+'\n')
     if args.preview:preview.save(args.preview)
     print(f'{args.style}: {count} button icons in {len(names)} localized font archives plus Controls pictures; {args.mod}/manifest.tsv')
 
