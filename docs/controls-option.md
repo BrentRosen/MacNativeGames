@@ -64,10 +64,11 @@ its files have none, so the writer shares exactly what the original shares.
 
 ### Automatic and Controls pictures
 
-Automatic waits up to 1.5 seconds for the initial GameController connection notification before choosing the first
-extended controller. This prevents an already-connected pad from being mistaken for a keyboard during startup: DualSense/DualShock → PlayStation,
-Nintendo/Joy-Con → Switch, Xbox and generic/MFi pads → Xbox, no extended controller → Keyboard. Hot-plugging is reflected
-at the next launch. Manual styles override detection. Keyboard prompts match the built-in keyboard bindings.
+Automatic waits up to 1.5 seconds for the first controller to be announced (GameController's, or a generic USB HID pad)
+and then takes the controller type of `runtime_gamepad_type` (runtime/gamepad.m), the same one that maps the face buttons:
+the type picked with key 6 when it is not auto, otherwise auto's guess (`gamepad_type_detect`: PlayStation names →
+PlayStation, Nintendo names → Switch, other pads → Xbox; generic HID pads → Switch). No controller → Keyboard.
+Hot-plugging is reflected at the next launch. Manual styles override detection. Keyboard prompts match the built-in keyboard bindings.
 
 `controller_pictures.py` draws original, flat Xbox and DualShock 4 diagrams with grey fills and dark outlines,
 matching the game's Controls-screen illustration style. No product photos, third-party mod art or downloads are used.
@@ -144,7 +145,7 @@ before. `make_button_icons.py` also writes the PlayStation style for a mod folde
 所有文件都用“不改内容就逐字节还原”的格式重写（`scripts/nx_formats.py` 的 BYML、MSBT、SARC），否则脚本停止。游戏的设置
 解析器不接受原文件里没有的共享 BYML 节点，所以写出时只共享原文件共享的部分。
 
-自动模式（默认）在启动时检测第一个手柄：DualSense/DualShock 显示 PlayStation，任天堂手柄显示 Switch，Xbox 或通用手柄显示 Xbox，没有手柄显示键盘。手动选择优先，重新启动后生效。控制说明画面也会使用相应的手柄或键盘图片（Xbox 和 DualShock 4 使用与游戏界面一致的扁平灰色示意图，并保留准确连接的引导线）；已有存档的选择保持不变。自定义 UI 覆盖层没有匹配的图片版本时保留其原有图片，日志会说明原因。
+自动模式（默认）在启动时按第一个手柄的控制器类型选择（与按 6 键选择的类型一致；自动时 PlayStation 手柄显示 PlayStation，任天堂手柄和通用 USB HID 手柄显示 Switch，其他手柄显示 Xbox），没有手柄显示键盘。手动选择优先，重新启动后生效。控制说明画面也会使用相应的手柄或键盘图片（Xbox 和 DualShock 4 使用与游戏界面一致的扁平灰色示意图，并保留准确连接的引导线）；已有存档的选择保持不变。自定义 UI 覆盖层没有匹配的图片版本时保留其原有图片，日志会说明原因。
 
 ### 和玩家模组一起用
 

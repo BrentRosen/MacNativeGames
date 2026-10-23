@@ -283,28 +283,10 @@ def xbox_style(g):
     }
 
 
-# PlayStation symbols, cut out of a disc of radius r centred at (cx, cy): outlines are a hole (clockwise) with the inside
-# filled again (counter-clockwise), the cross is one clockwise polygon so its two strokes do not cancel where they meet.
-def ps_symbol(pen, symbol, cx, cy, r):
-    reverse = ReverseContourPen(pen); stroke = r * 0.17
-    if symbol == 'circle':
-        circle(reverse, cx, cy, r * 0.52); circle(pen, cx, cy, r * 0.52 - stroke)
-    elif symbol == 'square':
-        s = r * 0.44
-        rounded(reverse, cx - s, cy - s, cx + s, cy + s, r * 0.05); rounded(pen, cx - s + stroke, cy - s + stroke, cx + s - stroke, cy + s - stroke, r * 0.02)
-    elif symbol == 'triangle':
-        h = r * 1.02; top, bottom = cy + h * 0.56, cy - h * 0.44; half = h / 3 ** 0.5
-        outer = [(cx, top), (cx + half, bottom), (cx - half, bottom)]
-        inset = stroke * 2   # the inner triangle's corners move twice the stroke along the bisectors
-        inner = [(cx, top - inset), (cx + half - inset * 3 ** 0.5 / 2, bottom + stroke), (cx - half + inset * 3 ** 0.5 / 2, bottom + stroke)]
-        polygon(pen, outer)                      # clockwise in y-up: a hole
-        polygon(reverse, inner)                  # reversed to counter-clockwise: filled
-    elif symbol == 'cross':
-        a, w = r * 0.50, stroke * 0.75           # arm reach and half-width of each stroke
-        pts = [(cx, cy + w * 1.414), (cx + a - w, cy + a + w), (cx + a + w, cy + a - w), (cx + w * 1.414, cy),
-               (cx + a + w, cy - a + w), (cx + a - w, cy - a - w), (cx, cy - w * 1.414), (cx - a + w, cy - a - w),
-               (cx - a - w, cy - a + w), (cx - w * 1.414, cy), (cx - a - w, cy + a - w), (cx - a + w, cy + a + w)]
-        polygon(pen, pts)                        # clockwise: a hole
+def oriented(pen, points, hole):
+    """A polygon counter-clockwise (filled) or clockwise (a hole), whatever order the points come in."""
+    area = sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(points, points[1:] + points[:1]))
+    polygon(pen, points if (area > 0) != hole else points[::-1])
 
 
 def playstation_style(g, by_label=False):
@@ -312,7 +294,25 @@ def playstation_style(g, by_label=False):
     by_label (TOTK_FACE_BUTTONS=label, or controls.txt south = a, east = b, west = x, north = y): Cross Circle Square Triangle."""
     def face(symbol, advance=640):
         def draw(pen):
-            circle(pen, advance / 2, CY, R); ps_symbol(pen, symbol, advance / 2, CY, R)
+            cx, s = advance / 2, R * 0.50   # symbol half size
+            circle(pen, cx, CY, R)
+            if symbol == 'circle':
+                circle(ReverseContourPen(pen), cx, CY, s); circle(pen, cx, CY, s * 0.70)
+            elif symbol == 'square':
+                oriented(pen, [(cx - s, CY - s), (cx + s, CY - s), (cx + s, CY + s), (cx - s, CY + s)], hole=True)
+                t = s * 0.70
+                oriented(pen, [(cx - t, CY - t), (cx + t, CY - t), (cx + t, CY + t), (cx - t, CY + t)], hole=False)
+            elif symbol == 'triangle':
+                pts = [(cx, CY + s * 1.10), (cx - s * 1.10, CY - s * 0.75), (cx + s * 1.10, CY - s * 0.75)]
+                gx, gy = cx, sum(y for _, y in pts) / 3
+                oriented(pen, pts, hole=True)
+                oriented(pen, [(gx + (x - gx) * 0.62, gy + (y - gy) * 0.62) for x, y in pts], hole=False)
+            else:   # cross: one 12-point outline, so the two strokes do not overlap as separate holes
+                a, w = s * 1.05, s * 0.22 * 2 ** 0.5   # arm reach along the diagonal, half stroke width
+                pts = [(cx, CY + w), (cx + a - w, CY + a), (cx + a, CY + a - w), (cx + w, CY),
+                       (cx + a, CY - a + w), (cx + a - w, CY - a), (cx, CY - w), (cx - a + w, CY - a),
+                       (cx - a, CY - a + w), (cx - w, CY), (cx - a, CY + a - w), (cx - a + w, CY + a)]
+                oriented(pen, pts, hole=True)
         return advance, draw
     def bumper(label, advance=820):
         def draw(pen):
@@ -322,27 +322,28 @@ def playstation_style(g, by_label=False):
         def draw(pen):
             rounded(pen, 60, Y0, advance - 60, Y1, 60, 230); g.hole(pen, label, advance / 2, CY - 20, 230, advance - 220)
         return advance, draw
-    def options(advance=640):   # Options: a pill with three bars
+    def options(advance=640):   # three bars, as on the DualSense Options button
         def draw(pen):
-            rounded(pen, 60, CY - 200, advance - 60, CY + 200, 200); reverse = ReverseContourPen(pen)
-            for dy in (-95, 0, 95):
-                rounded(reverse, advance / 2 - 130, CY + dy - 30, advance / 2 + 130, CY + dy + 30, 30)
+            circle(pen, advance / 2, CY, R); reverse = ReverseContourPen(pen)
+            for dy in (-115, 0, 115):
+                rounded(reverse, advance / 2 - 150, CY + dy - 38, advance / 2 + 150, CY + dy + 38, 38)
         return advance, draw
-    def create(advance=640):    # Create: a pill with three short strokes rising from a base line
+    def create(advance=640):   # three short strokes rising to the right, as on the Create button
         def draw(pen):
-            rounded(pen, 60, CY - 200, advance - 60, CY + 200, 200); reverse = ReverseContourPen(pen)
-            rounded(reverse, advance / 2 - 130, CY - 120, advance / 2 + 130, CY - 64, 28)
-            for dx in (-90, 0, 90):
-                rounded(reverse, advance / 2 + dx - 26, CY - 30, advance / 2 + dx + 26, CY + 120, 26)
+            circle(pen, advance / 2, CY, R); cx = advance / 2
+            for dx in (-110, 0, 110):
+                oriented(pen, [(cx + dx - 30, CY - 150), (cx + dx + 30, CY - 150), (cx + dx + 30, CY + 150), (cx + dx - 30, CY + 150)], hole=True)
         return advance, draw
-    dpad = xbox_style(g)
+    dpad_style = xbox_style(g)
     a, b, x, y = ('cross', 'circle', 'square', 'triangle') if by_label else ('circle', 'cross', 'triangle', 'square')
-    return {
+    icons = {
         0xE040: face(a), 0xE041: face(b), 0xE042: face(x), 0xE043: face(y),
         0xE044: bumper('L1'), 0xE045: bumper('R1'), 0xE046: trigger('L2'), 0xE047: trigger('R2'),
         0xE04B: options(), 0xE04C: create(),
-        **{cp: dpad[cp] for cp in (0xE049, 0xE060, 0xE061, 0xE062, 0xE063, 0xE064, 0xE065)},
     }
+    for cp in (0xE049, 0xE060, 0xE061, 0xE062, 0xE063, 0xE064, 0xE065):   # the d-pad is drawn as for Xbox
+        icons[cp] = dpad_style[cp]
+    return icons
 
 
 STYLES = {'keyboard': keyboard_style, 'xbox': xbox_style, 'playstation': playstation_style,

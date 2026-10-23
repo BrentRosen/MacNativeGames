@@ -107,25 +107,26 @@ static void load_controller_type(void) {
 
 static void save_controller_type(int type) { setting_write("controller-type.txt", gamepad_type_name(type), "controller type"); }
 
+/* The first controller announced, GameController's or a generic HID pad: an Automatic icon style waits for it. */
+static void initial_gamepad_seen(void) {
+    if (!initialGamepadReady && initialGamepad) {
+        initialGamepadReady = YES;
+        dispatch_group_leave(initialGamepad);
+    }
+}
+
 /* The connected-controller list can be empty until the main run loop delivers its initial notifications.
-   RomFS initializes on the guest thread before that happens. Wait for the first extended pad (at most 1.5 s),
-   leaving the main thread free to deliver discovery. Manual styles never call this function. A controller type picked with key 6 decides the style of a
-   connected pad, as it decides its face-button mapping. */
+   RomFS initializes on the guest thread before that happens. Wait for the first pad (at most 1.5 s), leaving the main
+   thread free to deliver discovery. Manual styles never call this function. The style is the controller type of
+   runtime_gamepad_type: the one picked with key 6, or auto's guess for the connected pad; no pad selects Keyboard. */
 const char *runtime_gamepad_icon_style(void) {
     @autoreleasepool {
         if (started && !NSThread.isMainThread)
             dispatch_group_wait(initialGamepad, dispatch_time(DISPATCH_TIME_NOW, 1500 * NSEC_PER_MSEC));
         __block const char *style = "keyboard";
         void (^select)(void) = ^{
-            for (GCController *controller in GCController.controllers) {
-                if (!controller.extendedGamepad) continue;
-                int type = atomic_load(&controllerType);
-                if (type != GAMEPAD_TYPE_AUTO) style = gamepad_type_name(type);
-                else if ([controller.extendedGamepad isKindOfClass:GCDualSenseGamepad.class] ||
-                    [controller.extendedGamepad isKindOfClass:GCDualShockGamepad.class]) style = "playstation";
-                else style = gamepad_icon_style(controller.productCategory.UTF8String, controller.vendorName.UTF8String);
-                break;
-            }
+            int detected = -1, type = runtime_gamepad_type(&detected);
+            if (detected >= 0) style = gamepad_type_name(type != GAMEPAD_TYPE_AUTO ? type : detected);
         };
         if (started && !NSThread.isMainThread) dispatch_sync(dispatch_get_main_queue(), select);
         else select();  /* Headless probes have no UI run loop. */
@@ -301,6 +302,7 @@ static void hid_pad_attach(IOHIDDeviceRef device) {
     IOHIDDeviceRegisterInputValueCallback(device, hid_value, NULL);
     IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
     hidPad.present = 1;
+    initial_gamepad_seen();
     fprintf(stderr, "[totk-input] HID gamepad connected: %s (%s)\n", name ? name : "unknown", manufacturer ? manufacturer : "unknown");
     refresh_gamepads();
 }
@@ -508,10 +510,7 @@ static void attach_gamepad(GCController *controller) {
     fprintf(stderr, "[totk-input] native gamepad connected: %s (%s), face buttons by %s\n",
             (controller.vendorName ?: @"unknown").UTF8String,
             (controller.productCategory ?: @"unknown").UTF8String, face_by_position(controller) ? "position" : "label");
-    if (!initialGamepadReady && initialGamepad) {
-        initialGamepadReady = YES;
-        dispatch_group_leave(initialGamepad);
-    }
+    initial_gamepad_seen();
     runtime_feedback_attach(controller);
     refresh_gamepads();
 }

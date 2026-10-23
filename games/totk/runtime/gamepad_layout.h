@@ -32,13 +32,6 @@ static inline int gamepad_names_playstation(const char *text) {   /* "DualSense"
     return gamepad_names_any(text, words, sizeof words / sizeof *words);
 }
 
-/* Automatic artwork uses the first extended controller at launch. Unknown/MFi pads use Xbox labels. */
-static inline const char *gamepad_icon_style(const char *category, const char *vendor) {
-    if (gamepad_names_nintendo(category) || gamepad_names_nintendo(vendor)) return "switch";
-    if (gamepad_names_playstation(category) || gamepad_names_playstation(vendor)) return "playstation";
-    return "xbox";
-}
-
 /* 1: map this controller's face buttons by position. category / vendor: GCController productCategory / vendorName. */
 static inline int gamepad_face_by_position(const char *category, const char *vendor) {
     const char *e = getenv("TOTK_FACE_BUTTONS");
