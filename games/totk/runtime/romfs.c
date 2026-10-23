@@ -46,7 +46,8 @@ static uint64_t handles[NH]; /* file index + 1; 0 is free */
    path, the overlay's size and SHA-256 and the original's SHA-256; a missing path, a size or hash mismatch or a changed
    original stops the start. The directories, in this order: the build's patches (scripts/make_romfs_patches.py;
    TOTK_ROMFS_PATCHES, default extracted/<version>/romfs-patches, 0 = none), the true-2K HeapDef overlay
-   (scripts/make_output_res_overlay.py) and the player's mods (TOTK_ROMFS_MODS, which the launcher sets to
+   (scripts/make_output_res_overlay.py), the Options menu's Button icons row (controls_init; Breath of the Wild: the
+   menu-bar Button icons choice, button_icons_init) and the player's mods (TOTK_ROMFS_MODS, which the launcher sets to
    <data>/mods/<version>; no manifest there = none). Each file can be replaced once, except that a mod file merged with the
    build's edit takes the place of the build's overlay (overlay_load). An overlay file is opened when the
    game opens it, so a mod can replace thousands of files (a dub's voice streams) without holding a descriptor each; the
@@ -245,10 +246,80 @@ static void button_icons_init(const char *mods) {
  }
  fclose(f);overlay_load(folder,1,0);fprintf(stderr,"[botw] Button icons: %s\n",style);
 }
+#else
+/* 1 when the manifests of overlay folders a and b name a common RomFS path (a missing manifest names none). */
+static int manifests_overlap(const char *a,const char *b) {
+ char path[4200],line[8192],name[4096];int found=0;snprintf(path,sizeof(path),"%s/manifest.tsv",a);FILE *fa=fopen(path,"r");if(!fa)return 0;
+ snprintf(path,sizeof(path),"%s/manifest.tsv",b);FILE *fb=fopen(path,"r");
+ if(fb)while(!found&&fgets(line,sizeof(line),fa)){
+  if(line[0]=='#'||sscanf(line,"%4095[^\t]",name)!=1)continue;rewind(fb);char other[8192];size_t n=strlen(name);
+  while(!found&&fgets(other,sizeof(other),fb))found=other[0]!='#'&&!strncmp(other,name,n)&&other[n]=='\t';}
+ fclose(fa);if(fb)fclose(fb);return found;
+}
+/* The Options menu's Button icons row (scripts/make_controls_option.py): TOTK_ROMFS_CONTROLS (default
+   extracted/<version>/romfs-controls, 0 = none) holds menu/ (the row, its text and its saved value) and
+   icons-<xbox|playstation|keyboard>/ (the button-icon font; Switch is the game's own). The game loads that font once, so the
+   style is read here from the row's value in option.sav: the Enum OptionData.IsControlStickUpDownReverse (murmur3
+   0xce2cee8e), whose values are the murmur3 hashes of the ChoiceType names Normal, Pro, Dark, Slow and Fast. option.sav is the
+   header (magic 0x01020304, the data offset at +8) and (hash, value) pairs from +0x20 up to that offset. No save yet,
+   or no value: Automatic (the first extended controller, otherwise Keyboard). */
+static const char *controls_style(void) {
+ const char *profile=getenv("TOTK_PROFILE_DIR");if(!profile)profile="user-data";uint64_t uid[2];runtime_account_uid(uid);
+ char path[4200];snprintf(path,sizeof(path),"%s/save/%016llx%016llx/option.sav",profile,(unsigned long long)uid[1],(unsigned long long)uid[0]);
+ static uint8_t sav[65536];int fd=open(path,O_RDONLY|O_CLOEXEC);if(fd<0)return runtime_gamepad_icon_style();ssize_t n=read(fd,sav,sizeof(sav));close(fd);
+ uint32_t magic,end;if(n<0x20)return runtime_gamepad_icon_style();memcpy(&magic,sav,4);memcpy(&end,sav+8,4);if(magic!=0x01020304u||end>(uint32_t)n)return runtime_gamepad_icon_style();
+ for(uint32_t o=0x20;o+8<=end;o+=8){uint32_t h,v;memcpy(&h,sav+o,4);memcpy(&v,sav+o+4,4);if(h!=0xce2cee8eu)continue;
+  switch(v){
+   case 0x390b012du:return "switch";
+   case 0xd4b93848u:return "xbox";
+   case 0xf106eb35u:return "playstation";
+   case 0xfbe02251u:return "keyboard";
+   default:return runtime_gamepad_icon_style();
+  }}
+ return runtime_gamepad_icon_style();
+}
+/* A picture archive is composed with exactly the UI archive already selected by built-in patches. A custom
+   layout without a matching generated variant keeps its own artwork. The font and menu still work. */
+static int controls_pictures(const char *dir,const char *style,char *folder,size_t cap,int *previous) {
+ *previous=-1;if(!strcmp(style,"switch"))return 0;
+ char source[4400],name[4096],expected[65];
+ for(int patched=0;patched<2;patched++){
+  snprintf(folder,cap,"%s/pictures-%s%s",dir,style,patched?"-patched":"");
+  snprintf(source,sizeof(source),"%s/manifest.tsv",folder);if(access(source,R_OK))continue;
+  snprintf(source,sizeof(source),"%s/source.tsv",folder);FILE *f=fopen(source,"r");if(!f)continue;
+  int ok=fscanf(f,"%4095[^\t]\t%64[0-9a-f]",name,expected)==2;fclose(f);if(!ok||strlen(expected)!=64)continue;
+  int prior=-1;for(size_t k=0;k<noverlay;k++)if(!strcmp(overlays[k].name,name)){prior=(int)k;break;}
+  if((prior>=0)!=patched)continue;
+  if(prior>=0){
+   int fd=open(overlays[prior].path,O_RDONLY|O_CLOEXEC);if(fd<0)continue;
+   CC_SHA256_CTX ctx;CC_SHA256_Init(&ctx);uint8_t buf[65536],digest[32];ssize_t n;
+   while((n=read(fd,buf,sizeof(buf)))>0)CC_SHA256_Update(&ctx,buf,(CC_LONG)n);
+   close(fd);if(n<0)continue;CC_SHA256_Final(digest,&ctx);char hex[65];
+   for(int k=0;k<32;k++)snprintf(hex+2*k,3,"%02x",digest[k]);if(strcmp(hex,expected))continue;
+  }
+  *previous=prior;return 1;
+ }
+ fprintf(stderr,"[totk] Controls pictures: no matching UI variant; keeping current layout artwork\n");return 0;
+}
+static void controls_init(const char *mods) {
+ const char *dir=getenv("TOTK_ROMFS_CONTROLS");if(dir&&!strcmp(dir,"0"))return;if(!dir)dir="extracted/" TOTK_GAME_DIR "/romfs-controls";
+ char menu[4200],icons[4200],pictures[4200],m[4300];const char *style=controls_style();
+ int previous=-1,have_pictures=controls_pictures(dir,style,pictures,sizeof(pictures),&previous);
+ snprintf(menu,sizeof(menu),"%s/menu",dir);snprintf(icons,sizeof(icons),"%s/icons-%s",dir,style);snprintf(m,sizeof(m),"%s/manifest.tsv",menu);
+ if(access(m,R_OK)){fprintf(stderr,"[totk] Button icons row: none (%s)\n",m);return;}
+ if(mods&&*mods&&strcmp(mods,"0")&&(manifests_overlap(menu,mods)||manifests_overlap(icons,mods)||(have_pictures&&manifests_overlap(pictures,mods)))){
+  fprintf(stderr,"[totk] Button icons row: off, because the mods in %s replace some of its files (options table, GameData list, messages, size table or button font)\n",mods);return;}
+ if(have_pictures){
+  if(previous>=0){free(overlays[previous].path);free(overlays[previous].name);overlays[previous]=overlays[--noverlay];}
+  overlay_load(pictures,1,0);
+ }
+ overlay_load(menu,0,0);if(strcmp(style,"switch"))overlay_load(icons,0,0);fprintf(stderr,"[totk] Button icons row: %s icons\n",style);
+}
 #endif
 /* TOTK_ROMFS_PATCHES (default extracted/<version>/romfs-patches; 0 = none); with a true-2K output bigger than 1920x1080
    also <TOTK_ROMFS_PATCHES_OUT, default extracted/<version>/romfs-patches-out>/<w>x<h> (the HeapDef sizes,
-   scripts/make_output_res_overlay.py); then the player's mods in TOTK_ROMFS_MODS (0 = none). */
+   scripts/make_output_res_overlay.py); the Button icons row (controls_init); then the player's mods in TOTK_ROMFS_MODS
+   (0 = none). */
 static void overlay_init(void) {
  const char *dir=getenv("TOTK_ROMFS_PATCHES");if(!dir||strcmp(dir,"0"))overlay_load(dir?dir:"extracted/" TOTK_GAME_DIR "/romfs-patches",0,0);
  /* A scene bigger than 1600x900 (TOTK_RENDER_RES, 1.4.3) grows the same heaps: its overlay is <w>x<h>-scene-<sw>x<sh>. */
@@ -259,10 +330,12 @@ static void overlay_init(void) {
   char m[4200];snprintf(m,sizeof(m),"%s/manifest.tsv",d);
   if(access(m,R_OK)){fprintf(stderr,"[totk] RomFS overlay %s missing: make it with\n  .venv/bin/python scripts/make_output_res_overlay.py %ux%u%s%s --version " TOTK_GAME_DIR "%s%s\n",d,w,h,*scene?" --scene ":"",*scene?scene+7:"",out?" --output-root ":"",out?out:"");
    runtime_fail("HeapDef overlay for this output / scene size missing (see the line above)");}
-  overlay_load(d,1,0);}
+ overlay_load(d,1,0);}
  const char *mods=getenv("TOTK_ROMFS_MODS");
 #ifdef GAME_BOTW
  button_icons_init(mods);
+#else
+ controls_init(mods);
 #endif
  if(mods&&*mods&&strcmp(mods,"0"))overlay_load(mods,0,1);
  added_init();

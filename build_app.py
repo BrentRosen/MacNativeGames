@@ -597,6 +597,34 @@ def step_code(tree, game, keys, env, logs, *, version="v0", mod=None):
     report_path.write_text(json.dumps(report, indent=2) + '\n')
 
 
+CONTROLS_CHECKED = ('v0', 'v143')   # versions whose Options menu, GameData list and save reader the Button icons row was checked on
+
+
+def controls_option(tree, version, logs):
+    """The Options menu's Button icons row (scripts/make_controls_option.py) in extracted/<version>/romfs-controls, made
+    again when one of its scripts changes. On a version it was not checked on, a refusal leaves the app without the row."""
+    out = tree / f'extracted/{version}/romfs-controls'
+    scripts = ('make_controls_option.py', 'nx_formats.py', 'make_button_icons.py', 'make_mod_manifest.py', 'controller_pictures.py')
+    stamp = {name: sha256(tree / 'scripts' / name) for name in scripts}
+    ui_sources = sorted((tree / f'extracted/{version}/romfs-patches/UI/LayoutArchive').glob('Common.*.blarc.zs'))
+    stamp.update({str(p.relative_to(tree)): sha256(p) for p in ui_sources})
+    record = out / 'sources.json'
+    if (out / 'menu/manifest.tsv').is_file() and record.is_file() and json.loads(record.read_text()) == stamp:
+        return
+    say('2/4 data: the Button icons row of the Options menu (Switch / Xbox / PlayStation / Keyboard / Automatic)')
+    try:
+        run([tree / '.venv/bin/python', 'scripts/make_controls_option.py', '--romfs', f'extracted/{version}/romfs',
+             '--output', f'extracted/{version}/romfs-controls'], logs / f'{version}-controls_option.log', cwd=tree)
+    except BuildError:
+        if version in CONTROLS_CHECKED:
+            raise
+        shutil.rmtree(out, ignore_errors=True)
+        say(f'2/4 data: the Button icons row does not fit this version\'s data yet; building without it '
+            f'(details: {logs / f"{version}-controls_option.log"})')
+        return
+    record.write_text(json.dumps(stamp, indent=2) + '\n')
+
+
 HEAPDEF = 'System/HeapSize/Product.Nin_NX_NVN.HeapDef.byml.zs'
 
 
@@ -763,6 +791,7 @@ def step_data(tree, game, keys, logs, *, firmware=None, shared_fonts=None, mod=N
             + ('; built on top of the mod\'s heap sizes' if heapdef else ''))
         run([py, 'scripts/make_output_res_overlay.py', '2560x1440', *(['--heapdef', heapdef] if heapdef else [])],
             logs / 'output_res_overlay.log', cwd=tree)
+    controls_option(tree, 'v0', logs)
 
 
 def build_hactool(tree, logs):
@@ -899,6 +928,7 @@ def step_update_data(tree, game, update, keys, logs, *, version='v112', mod=None
             arguments = [*arguments, '--heapdef', heapdef]
         run([tree/'.venv/bin/python', 'scripts/'+script, *arguments, '--version', version],
             logs/(version+'-'+script+(f'-{i}' if i > 1 else '')+'.log'), cwd=tree)
+    controls_option(tree, version, logs)
 
 
 def build_spirv_cross(tree, logs):
@@ -1262,7 +1292,8 @@ def step_app(tree, out, logs, *, version="v0", game='totk'):
     for rel in files:
         clone(tree / rel, res / rel)
     clone(tree / 'prebuilt/macos-arm64/totk_xlate', res / 'build/shader-service/totk_xlate')   # where totk_shader_rt.m looks for it
-    for rel in (f'extracted/{version}/romfs-patches', f'extracted/{version}/romfs-patches-out', f'extracted/{version}/romfs-button-icons', 'extracted/firmware/shared-fonts'):
+    for rel in (f'extracted/{version}/romfs-patches', f'extracted/{version}/romfs-patches-out', f'extracted/{version}/romfs-controls',
+                f'extracted/{version}/romfs-button-icons', 'extracted/firmware/shared-fonts'):
         if (tree / rel).is_dir():   # Breath of the Wild has no RomFS overlays
             copy_tree(tree / rel, res / rel)
     seed = tree/f'build/shader-seed/{version}'

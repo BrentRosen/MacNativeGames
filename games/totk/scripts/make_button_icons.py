@@ -13,7 +13,8 @@ Styles:
             + - = Enter Tab, left stick = W A S D, right stick = arrow keys, stick presses = Z C, d-pad = T F G H.
   xbox      the buttons in the place a controller presses them (controllers follow the Switch's physical layout):
             A B X Y = B A Y X, L R = LB RB, ZL ZR = LT RT, + - = Menu and View, the d-pad as a cross.
-  playstation  Circle/Cross/Triangle/Square, L1/R1, L2/R2 and Options/Create, following the same positional mapping.
+  playstation  the same places: A B X Y = circle, cross, triangle, square, L R = L1 R1, ZL ZR = L2 R2, + - = Options and
+            Create, the d-pad as a cross.
 Prompts drawn as fixed images (some tutorial animations) keep the Switch icons: they are not glyphs of this font.
 
 Format notes (checked on 1.0.0 and 1.2.1): a .bfotf is an OpenType (CFF) font with an 8-byte header, XOR-ed with a
@@ -22,9 +23,9 @@ The archive is a SARC; its members are packed again in their original order and 
 External.bfotf must come out byte-identical. The archive is compressed with the zstd dictionary it used (Pack/ZsDic).
 
 Needs fontTools (python3.14 -m pip install fonttools) and Python 3.14 (compression.zstd). An existing font archive in the mod
-folder (another mod's, or an earlier run) is only overwritten with --replace. The xbox style matches the default face-button
-mapping by position (not TOTK_FACE_BUTTONS=label or face buttons changed in controls.txt).
-usage: make_button_icons.py <mod folder> (--app <Tears of the Kingdom.app> | --romfs <folder>) [--version v121] [--style xbox] [--replace]
+folder (another mod's, or an earlier run) is only overwritten with --replace. The xbox and playstation styles match the
+default face-button mapping by position (not TOTK_FACE_BUTTONS=label or face buttons changed in controls.txt).
+usage: make_button_icons.py <mod folder> (--app <Tears of the Kingdom.app> | --romfs <folder>) [--version v121] [--style xbox|playstation] [--replace]
 """
 import argparse
 import io
@@ -343,9 +344,9 @@ STYLES = {'keyboard': keyboard_style, 'xbox': xbox_style, 'playstation': playsta
 
 def redraw(otf, text_fonts, style):
     font = TTFont(io.BytesIO(otf))
+    icons = STYLES[style](Glyphs(text_fonts))
     cff = font['CFF '].cff; top = cff.topDictIndex[0]; charstrings = top.CharStrings; private = top.Private
     nominal = getattr(private, 'nominalWidthX', 0); cmap = font.getBestCmap()
-    icons = STYLES[style](Glyphs(text_fonts))
     for cp, (advance, draw) in icons.items():
         pen = T2CharStringPen(advance - nominal, None); draw(pen)
         charstrings[cmap[cp]] = pen.getCharString(private=private, globalSubrs=cff.GlobalSubrs)
@@ -356,6 +357,25 @@ def redraw(otf, text_fonts, style):
         font['hmtx'][cmap[cp]] = (advance, int(round(box.bounds[0])))
     out = io.BytesIO(); font.save(out)
     return out.getvalue(), len(icons)
+
+
+def font_archive(read, dictionaries, style):
+    """The compressed font archive (Font/Font.Nin_NX_NVN.bfarc.zs) with the style's icons drawn in External.bfotf.
+    read(path) returns a RomFS file; dictionaries maps zstd dictionary IDs to Pack/ZsDic's dictionaries."""
+    raw = read(ARCHIVE)
+    info = zstd.get_frame_info(raw); dictionary = dictionaries[info.dictionary_id]
+    archive = zstd.decompress(raw, zstd_dict=dictionary); assert len(archive) == info.decompressed_size
+    members = sarc_members(archive)
+    otf, key = bfotf_decode(archive[slice(*members[FONT])])
+    assert otf[:4] == b'OTTO', 'External.bfotf did not decode to an OpenType font'
+    text_fonts = [TTFont(io.BytesIO(bfotf_decode(archive[slice(*members[name])])[0])) for name in TEXT_FONTS]
+    new_otf, count = redraw(otf, text_fonts, style)
+    new_blob = bfotf_encode(new_otf, key); assert bfotf_decode(new_blob)[0] == new_otf
+    new_archive = repack(archive, FONT, new_blob)
+    data = zstd.compress(new_archive, level=19, zstd_dict=dictionary)
+    assert zstd.decompress(data, zstd_dict=dictionary) == new_archive
+    assert zstd.get_frame_info(data).dictionary_id == info.dictionary_id
+    return data, count, len(new_archive)
 
 
 def main():
@@ -389,19 +409,7 @@ def main():
         pack = zstd.decompress(read('Pack/ZsDic.pack.zs'))
         for lo, hi in sarc_members(pack).values():
             d = zstd.ZstdDict(pack[lo:hi]); dictionaries[d.dict_id] = d
-        raw = read(ARCHIVE)
-    info = zstd.get_frame_info(raw); dictionary = dictionaries[info.dictionary_id]
-    archive = zstd.decompress(raw, zstd_dict=dictionary); assert len(archive) == info.decompressed_size
-    members = sarc_members(archive)
-    otf, key = bfotf_decode(archive[slice(*members[FONT])])
-    assert otf[:4] == b'OTTO', 'External.bfotf did not decode to an OpenType font'
-    text_fonts = [TTFont(io.BytesIO(bfotf_decode(archive[slice(*members[name])])[0])) for name in TEXT_FONTS]
-    new_otf, count = redraw(otf, text_fonts, args.style)
-    new_blob = bfotf_encode(new_otf, key); assert bfotf_decode(new_blob)[0] == new_otf
-    new_archive = repack(archive, FONT, new_blob)
-    data = zstd.compress(new_archive, level=19, zstd_dict=dictionary)
-    assert zstd.decompress(data, zstd_dict=dictionary) == new_archive
-    assert zstd.get_frame_info(data).dictionary_id == info.dictionary_id
+        data, count, _ = font_archive(read, dictionaries, args.style)
 
     target = args.mod / ARCHIVE; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(data)
     print(f'{target}: {count} icons redrawn ({args.style}), {len(data)} bytes')

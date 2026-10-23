@@ -154,7 +154,12 @@ def main():
             assert len(new)==len(archive), 'font archive grew: resource-size table would need updating'
             outputs[n]=literal_yaz0(new,raw)
             assert yaz0(outputs[n])==new
-    from controller_pictures import replace_bootup, verify_pack_budget
+    import importlib.util   # BotW's controller_pictures, loaded by path: games/totk/scripts has a module of the same name
+    spec = importlib.util.spec_from_file_location('botw_controller_pictures', Path(__file__).resolve().parent / 'controller_pictures.py')
+    pictures = sys.modules.setdefault('botw_controller_pictures', importlib.util.module_from_spec(spec))
+    if not hasattr(pictures, 'replace_bootup'):
+        spec.loader.exec_module(pictures)
+    replace_bootup, verify_pack_budget = pictures.replace_bootup, pictures.verify_pack_budget
     with (romfs/'romfs.bin').open('rb') as f:
         offset,size=index['Pack/Bootup.pack'];f.seek(offset);boot=f.read(size)
         offset,size=index['System/Resource/ResourceSizeTable.product.srsizetable'];f.seek(offset);verify_pack_budget(f.read(size))

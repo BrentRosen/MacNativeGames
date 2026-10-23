@@ -3,5 +3,5 @@ cryptography==50.0.2   # decrypting the card image (NCA / XCI)
 lz4==4.4.5             # the code modules (NSO segments)
 capstone==5.0.9        # the code rewriter's disassembler
 nsz==5.0.0             # decompress update containers before NCA extraction
-fonttools==4.67.0      # button-icon styles generated from the player font
-Pillow==12.3.0         # BotW bitmap button-icon pages
+fonttools==4.67.0      # button-icon fonts: BotW styles and the TOTK Options row (scripts/make_controls_option.py)
+Pillow==12.3.0         # BotW bitmap button-icon pages and TOTK Controls-screen drawings

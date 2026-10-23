@@ -14,6 +14,13 @@ int main(void) {
     check(!gamepad_face_by_position("Switch Pro Controller", "Pro Controller"), "Switch Pro Controller by label");
     check(!gamepad_face_by_position("Nintendo Switch Joy-Con (L/R)", "Joy-Con (L/R)"), "Joy-Con by label");
     check(gamepad_face_by_position(NULL, NULL), "an unnamed controller by position");
+    check(!strcmp(gamepad_icon_style("DualSense", NULL), "playstation"), "automatic DualSense");
+    check(!strcmp(gamepad_icon_style("DualShock 4", "Wireless Controller"), "playstation"), "automatic DualShock");
+    check(!strcmp(gamepad_icon_style("Xbox One", NULL), "xbox"), "automatic Xbox");
+    check(!strcmp(gamepad_icon_style("MFi", "SONY PlayStation Controller"), "playstation"), "automatic vendor fallback");
+    check(!strcmp(gamepad_icon_style(NULL, "Nintendo Switch Pro Controller"), "switch"), "automatic Nintendo");
+    check(!strcmp(gamepad_icon_style("Joy-Con (L/R)", NULL), "switch"), "automatic Joy-Con");
+    check(!strcmp(gamepad_icon_style(NULL, NULL), "xbox"), "automatic generic extended pad");
     // by position: Circle / Xbox B (right) is A, Cross / Xbox A (bottom) is B, Triangle / Y (top) is X, Square / X (left) is Y
     check(gamepad_face_bits(0, 1, 0, 0, 1) == GAMEPAD_SWITCH_A, "right button is Switch A");
     check(gamepad_face_bits(1, 0, 0, 0, 1) == GAMEPAD_SWITCH_B, "bottom button is Switch B");
