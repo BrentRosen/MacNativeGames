@@ -165,7 +165,8 @@ def main():
         offset,size=index['System/Resource/ResourceSizeTable.product.srsizetable'];f.seek(offset);verify_pack_budget(f.read(size))
     if (args.mod/'Pack/Bootup.pack').exists() and not args.replace:
         ap.error('a Controls picture mod already exists; use --replace to change styles')
-    outputs['Pack/Bootup.pack']=replace_bootup(boot,args.style,args.controller_art)
+    outputs['Pack/Bootup.pack']=replace_bootup(boot,args.style,args.controller_art,
+                                           prompt_icons=designs if args.style=='keyboard' else None)
     for n,data in outputs.items():
         target=args.mod/n;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
     found=manifest(args.mod,romfs);assert not found.added and not found.misspelt   # a Manifest record, read by name

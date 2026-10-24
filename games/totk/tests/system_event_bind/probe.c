@@ -42,6 +42,7 @@ uint64_t runtime_now_ns(void) { mach_timebase_info_data_t t; mach_timebase_info(
 #ifdef GAME_BOTW
 uint64_t runtime_hle_tsd_off;                                   /* hle_stack.c: 0 = no host-stack slot, the preemption signal does nothing */
 int runtime_guest_code_pc(uint64_t pc) { (void)pc; return 0; }  /* loader.c */
+int runtime_module_text(unsigned i, const uint8_t **base, uint64_t *text_end, const char **name) { (void)i; (void)base; (void)text_end; (void)name; return 0; }   /* loader.c: no modules, no spin waits */
 #endif
 void hle_bind_system_event(void *event, int autoclear);
 void hle_signal_system_event(void *event);

@@ -20,7 +20,9 @@ The Xbox and PlayStation labels follow the default controller mapping by positio
 B/A/Y/X or PlayStation Circle/Cross/Triangle/Square. Custom controller remaps or `TOTK_FACE_BUTTONS=label` can disagree
 with those prompts. Keyboard labels follow the launcher's default keys. The Controls screen also follows the selected style: light Xbox or DualSense illustrations with the native
 blue group outlines and callouts moved to the corresponding inputs, or a keyboard illustration. Other fixed-image tutorials retain
-their original artwork.
+their original artwork. Keyboard also replaces the fixed action-button textures used by Examine and related
+HUD actions: A/B/X/Y/L/ZL show J/K/I/U/Q/Opt. These textures are independent of the prompt font; controller styles
+keep their existing action-button artwork.
 
 ## Standalone mod
 
@@ -56,6 +58,9 @@ texture storage, grayscale/alpha format, component mapping, tiling and decoded C
 callouts and group outlines at the drawn controls, including the expanded rear view, while preserving localized text and action visibility. Common is recompressed with
 LZ77; the outer pack can grow slightly. Generation refuses a game whose resource table gives Bootup.pack a fixed
 size budget. Other pack members remain byte-identical.
+
+The Keyboard set additionally replaces the six `Nt_KeyTex{A,B,X,Y,L,ZL}_00^d` action masks in the same texture bank.
+Their R8 format, 48×48 dimensions, headers, tiling, padding and allocated storage remain unchanged.
 
 Synthetic tests cover Yaz0 roundtrips, BC4 decoding, grayscale/alpha picture encoding, controller storage, callout endpoints, unchanged font metadata and non-target glyph pixels, and refusal
 of unfamiliar geometry. Native AppKit tests exercise all five choices, checkmarks, profile persistence, invalid-choice

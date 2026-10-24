@@ -286,7 +286,8 @@ and refuses files changed during play. Added files and their parent folders are 
 uses `<TOTK_ROMFS_MODS>-aoc`. DLC mods do not change the base-game overlay namespace.
 
 BNP packages must first be merged/exported by a compatible mod manager: their `logs/` entries are patches,
-not game files. Mod compatibility with a game version still needs checking after a successful merge.
+not game files. [UKMM](ukmm.md) does this for the Mac app: it merges and deploys, and `games/botw/scripts/ukmm.py sync`
+links the deploy, writes the manifests and fixes the resource size table. Mod compatibility with a game version still needs checking after a successful merge.
 
 ### Notes
 

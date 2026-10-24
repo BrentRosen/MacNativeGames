@@ -4,7 +4,7 @@ import json
 import sys
 import zlib
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'totk/scripts'))
 from controller_artwork import drawing, DIAGRAM_ANCHORS, GROUP_RADIUS
 from make_button_icons import sarc_members, repack
@@ -95,6 +95,31 @@ def shoulder(style):
     for x in (404,431,458):ellipse((x-7,79,x+7,84),'#cccccc')
     ellipse((174,77,186,82),'#cccccc')
     return im.resize((576,100),Image.Resampling.LANCZOS)
+
+
+ACTION_ICONS={'A':0xE040,'B':0xE041,'X':0xE042,'Y':0xE043,'L':0xE044,'ZL':0xE046}
+
+
+def replace_action_textures(data,icons):
+    """DoCommand (including Examine) uses R8 images, independently of the prompt font."""
+    targets={f'Nt_KeyTex{key}_00^d':cp for key,cp in ACTION_ICONS.items()}
+    out=bytearray(data);found=set()
+    for name,at in texture_rows(data):
+        if name not in targets:continue
+        w,h,depth,layers,tile=struct.unpack_from('<5I',data,at+36)
+        assert (w,h,depth,layers)==(48,48,1,1) and struct.unpack_from('<I',data,at+28)[0]==0x201, 'unexpected action icon format'
+        size=struct.unpack_from('<I',data,at+80)[0];pt=struct.unpack_from('<Q',data,at+112)[0];start=struct.unpack_from('<Q',data,pt)[0]
+        assert start+size<=len(data)
+        bitmap=ImageOps.contain(icons[targets[name]],(46,46),Image.Resampling.LANCZOS)
+        image=Image.new('L',(w,h));image.paste(bitmap,((w-bitmap.width)//2,(h-bitmap.height)//2))
+        pixels=image.tobytes()
+        for y in range(h):
+            for x in range(w):
+                off=block_offset(x,y,w,tile&7);assert off<size
+                out[start+off]=pixels[y*w+x]
+        found.add(name)
+    assert found==set(targets), 'missing action icon textures'
+    return bytes(out)
 
 
 def replace_textures(data,style,art=None):
@@ -253,9 +278,11 @@ def verify_pack_budget(table):
         assert name!=b'Pack/Bootup.pack', 'Bootup has a fixed named resource budget'
 
 
-def replace_bootup(boot,style,art=None):
+def replace_bootup(boot,style,art=None,prompt_icons=None):
     members=sarc_members(boot);name='Layout/Common.sblarc';raw=boot[slice(*members[name])];common=yaz0(raw);cm=sarc_members(common)
-    image='timg/__Combined.bntx';common=repack(common,image,replace_textures(common[slice(*cm[image])],style,art))
+    image='timg/__Combined.bntx';textures=replace_textures(common[slice(*cm[image])],style,art)
+    if prompt_icons is not None:textures=replace_action_textures(textures,prompt_icons)
+    common=repack(common,image,textures)
     layout='blyt/PaAllControllerTipsNN_00.bflyt';cm=sarc_members(common);changed,edits=replace_layout(common[slice(*cm[layout])],style,art);common=repack(common,layout,changed)
     for n in cm:
         if n.startswith('anim/PaAllControllerTipsNN_00') and n.endswith('.bflan'):

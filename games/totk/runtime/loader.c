@@ -55,6 +55,8 @@ uint8_t *runtime_module_base(const char *name){for(unsigned i=0;i<NM;i++)if(!str
 /* Is pc in a module's original code (not in the patch area, where rewritten windows and gates are)? Called from a signal
    handler (threads.c, asynchronous preemption): only reads the module table. */
 int runtime_guest_code_pc(uint64_t pc){for(unsigned i=0;i<NM;i++){uint64_t b=(uintptr_t)modules[i].base;if(b&&pc>=b&&pc-b<modules[i].text_end)return 1;}return 0;}
+/* Module i's original code (threads.c, the spin-wait scan): its base, the end of its text and its name; 0 past the last. */
+int runtime_module_text(unsigned i,const uint8_t **base,uint64_t *text_end,const char **name){if(i>=NM)return 0;*base=modules[i].base;*text_end=modules[i].text_end;*name=modules[i].name;return 1;}
 #endif
 /* RELRO in newer SDKs protects relocated data after linking. Keep permissions at
  * the guest's 4 KiB granularity. A Darwin 16 KiB page receives the union of its

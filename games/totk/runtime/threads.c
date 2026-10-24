@@ -80,6 +80,10 @@ typedef struct thr {
     uint64_t cwait_ns;            // when it last queued for a virtual core (starvation rule, core_beats)
     uint64_t protect_until;       // given a core by the starvation rule: no priority preemption before this
     int cqueued;                  // in g_core_wait: queued by core_take, or by wake_queue the moment it was woken
+    int spin_kick;                // a waiter asks whether this owner polls a spin-wait loop (spin gate, preempt_signal)
+    uint64_t spin_kick_ns;        // when the last such signal was sent (at most one per SPIN_KICK_NS)
+    uint64_t spin_since;          // first signal that found it in a spin-wait loop, 0 when the last one did not
+    uint64_t gate_until, gate_backoff;   // gave its core up from a spin wait: no preemption before gate_until; the back-off
 #endif
 } thr_t;
 static thr_t *g_all;
@@ -219,12 +223,13 @@ static int starved(const thr_t *w, uint64_t now) { sched_knobs(); return g_starv
 static void core_grant(int c) {   // holding G: give free core c to the best waiter
     thr_t *b = NULL, **bp = NULL;
 #ifdef GAME_BOTW
-    uint64_t now = now_ns(); int bpri = 0, bst = 0;   // starved waiters first, then by effective priority, then first come
-    for (thr_t **p = &g_core_wait; *p; p = &(*p)->cnext) {
+    uint64_t now = now_ns(); int bpri = 0, bst = 0;   // starved waiters first, then those not backing off from a spin wait
+    for (thr_t **p = &g_core_wait; *p; p = &(*p)->cnext) {   // (spin gate), then by effective priority, then first come
         if (!core_allowed(*p, c)) continue;
-        int st = starved(*p, now), pr = eff_prio(*p);
+        int st = starved(*p, now) * 2 + (now >= (*p)->gate_until), pr = eff_prio(*p);
         if (!b || st > bst || (st == bst && (pr < bpri || (pr == bpri && (*p)->cseq < b->cseq)))) { b = *p; bp = p; bpri = pr; bst = st; }
     }
+    bst >>= 1;
     if (b && bst) { b->protect_until = now + PROTECT_NS; if (g_starve_grants++ < 20) fprintf(stderr, "[threads] core %d to thread %#x (priority %d) after %.1f ms waiting: starvation rule\n", c, b->handle, b->prio, (now - b->cwait_ns) / 1e6); }
     if (b) b->cqueued = 0;
 #else
@@ -255,7 +260,7 @@ static void core_put(thr_t *t) {   // holding G
 static int g_async_preempt = -1;
 static uint64_t g_preempt_kicks, g_preempt_async;   // signals sent / cores given up in the handler (state dump)
 static int core_beats(const thr_t *w, const thr_t *o, uint64_t now) {   // holding G: may waiter w take running o's core?
-    if (now < o->protect_until) return 0;
+    if (now < o->protect_until || now < w->gate_until) return 0;
     int wp = eff_prio(w), op = eff_prio(o);
     return wp < op || (wp == op && op == 59 && now - o->core_since >= 10000000ull)
         || (starved(w, now) && now - o->core_since >= STARVE_NS);
@@ -264,6 +269,157 @@ static int core_should_yield(const thr_t *t) {   // holding G: does a waiter tha
     uint64_t now = now_ns();
     for (const thr_t *w = g_core_wait; w; w = w->cnext) if (core_allowed(w, t->cur_core) && core_beats(w, t, now)) return 1;
     return 0;
+}
+/* Spin-wait gate (issue #480; after nxnative's spin waits, dm/tools/patch_nso.py and dm/host/hle_thread.c dm_spin_wait).
+   BotW's spin locks poll without an SVC (1.9.0 main+0xef635c / +0xef6368: ldr, cmp, b.eq; ldaxr, cbz, clrex, b). On the
+   Switch the holder runs on another core meanwhile. Here a holder that lost its virtual core inside the few instructions
+   of its critical section waits for a core, and Horizon's rule never lets it preempt the better-priority threads that
+   spin for its lock on every core it may use: frames of 100 ms to 1.4 s, about once a second, until a host signal or the
+   20 ms look of another waiter happened to free one. A loop that only another thread can end -- a short backward branch
+   whose body only loads (no writeback), computes, compares and branches out, with no store, call, SVC or system register,
+   and that writes no register its own iteration reads before writing -- is a spin wait. Such loops are found once, in
+   every module's code as it runs (after the game patches). A waiter that may not preempt an owner asks it, at most once
+   per SPIN_KICK_NS, whether it polls such a loop (SIGUSR2, preempt_signal); an owner found in one for the gate time
+   (default 2 ms, TOTK_SPIN_GATE=<us>; 0 turns the gate off) gives its core to the waiters and queues again, and for a
+   back-off (SPIN_BACKOFF_MIN doubling to SPIN_BACKOFF_MAX while it keeps spinning) takes no core by priority and comes
+   after the other waiters. That is a short SleepThread at the spin, which Horizon allows anywhere. */
+#define SPIN_KICK_NS 1000000ull
+#define SPIN_BACKOFF_MIN 100000ull
+#define SPIN_BACKOFF_MAX 1000000ull
+#define SPIN_LOOP_MAX 16                       /* instructions from the loop head to its back edge */
+typedef struct { uint64_t lo, hi; } spin_range_t;   /* guest addresses [lo, hi], sorted and disjoint */
+static spin_range_t *g_spin_ranges; static unsigned g_spin_nranges;
+static int g_spin_gate = -1; static uint64_t g_spin_gate_ns;
+static uint64_t g_spin_kicks, g_spin_gates;   /* signals sent / cores given up from a spin wait (state dump) */
+int runtime_module_text(unsigned i, const uint8_t **base, uint64_t *text_end, const char **name);   // loader.c
+#define SPIN_REG(r) ((r) == 31 ? 0ull : 1ull << (r))   /* 31: the zero register, or SP (only read; writes are refused) */
+#define SPIN_FLAGS (1ull << 32)
+static int64_t spin_sext(uint32_t v, int bits) { return (int64_t)((uint64_t)v << (64 - bits)) >> (64 - bits); }
+/* One instruction of a candidate loop: the registers it reads and writes, whether it branches (1 conditional, 2 not) and
+   by how many bytes. 0 for anything a spin wait may not contain. */
+static int spin_insn(uint32_t w, uint64_t *rd, uint64_t *wr, int *br, int64_t *off) {
+    unsigned d = w & 31, n = (w >> 5) & 31, m = (w >> 16) & 31, a = (w >> 10) & 31;
+    *rd = *wr = 0; *br = 0; *off = 0;
+    if ((w & 0xffffff1f) == 0xd503201f) return 1;   // NOP, YIELD, WFE, WFI, SEV, SEVL
+    if ((w & 0xfffff0ff) == 0xd503305f || (w & 0xfffff0ff) == 0xd503309f || (w & 0xfffff0ff) == 0xd50330bf || (w & 0xfffff0ff) == 0xd50330df) return 1;   // CLREX, DSB, DMB, ISB
+    if ((w & 0xff000010) == 0x54000000) { *rd = SPIN_FLAGS; *br = (w & 15) >= 14 ? 2 : 1; *off = spin_sext((w >> 5) & 0x7ffff, 19) * 4; return 1; }   // B.cond
+    if ((w & 0x7e000000) == 0x34000000) { *rd = SPIN_REG(d); *br = 1; *off = spin_sext((w >> 5) & 0x7ffff, 19) * 4; return 1; }   // CBZ / CBNZ
+    if ((w & 0x7e000000) == 0x36000000) { *rd = SPIN_REG(d); *br = 1; *off = spin_sext((w >> 5) & 0x3fff, 14) * 4; return 1; }   // TBZ / TBNZ
+    if ((w & 0xfc000000) == 0x14000000) { *br = 2; *off = spin_sext(w & 0x3ffffff, 26) * 4; return 1; }   // B
+    int ui = (w & 0x3f000000) == 0x39000000, ro = (w & 0x3f200c00) == 0x38200800, un = (w & 0x3f200400) == 0x38000000;
+    if (ui || ro || un) {   // LDR* (unsigned offset, register offset, unscaled, unprivileged; no writeback), PRFM
+        unsigned size = w >> 30, opc = (w >> 22) & 3;
+        if (opc == 0 || (size >= 2 && opc == 3)) return 0;   // a store, or unallocated
+        *rd = SPIN_REG(n) | (ro ? SPIN_REG(m) : 0); *wr = size == 3 && opc == 2 ? 0 : SPIN_REG(d); return 1;
+    }
+    if ((w & 0x3f000000) == 0x18000000) { *wr = w >> 30 == 3 ? 0 : SPIN_REG(d); return 1; }   // LDR (literal), PRFM (literal)
+    if ((w & 0x3fc00000) == 0x29400000 || (w & 0x3fc00000) == 0x28400000) {   // LDP / LDPSW / LDNP (offset, no writeback)
+        if (w >> 30 == 3) return 0;
+        *rd = SPIN_REG(n); *wr = SPIN_REG(d) | SPIN_REG(a); return 1;
+    }
+    if ((w & 0x3f000000) == 0x08000000) {   // exclusive and ordered: LDXR, LDAXR, LDAR, LDLAR, LDXP, LDAXP only
+        int l = (w >> 22) & 1, o1 = (w >> 21) & 1, o2 = (w >> 23) & 1;
+        if (!l || (o1 && o2) || (o1 && !(w >> 31))) return 0;   // stores, CAS, CASP
+        *rd = SPIN_REG(n); *wr = SPIN_REG(d) | (o1 ? SPIN_REG(a) : 0); return 1;
+    }
+    if ((w & 0x1f800000) == 0x11000000) {   // ADD / SUB (immediate)
+        int s = (w >> 29) & 1; if (!s && d == 31) return 0;   // writes SP
+        *rd = SPIN_REG(n); *wr = SPIN_REG(d) | (s ? SPIN_FLAGS : 0); return 1;
+    }
+    if ((w & 0x1f800000) == 0x12000000) {   // AND / ORR / EOR / ANDS (immediate)
+        int s = ((w >> 29) & 3) == 3; if (!s && d == 31) return 0;
+        *rd = SPIN_REG(n); *wr = SPIN_REG(d) | (s ? SPIN_FLAGS : 0); return 1;
+    }
+    if ((w & 0x1f800000) == 0x12800000) { unsigned opc = (w >> 29) & 3; if (opc == 1) return 0; *rd = opc == 3 ? SPIN_REG(d) : 0; *wr = SPIN_REG(d); return 1; }   // MOVN / MOVZ / MOVK
+    if ((w & 0x1f800000) == 0x13000000) { *rd = SPIN_REG(n) | (((w >> 29) & 3) == 1 ? SPIN_REG(d) : 0); *wr = SPIN_REG(d); return 1; }   // SBFM / BFM / UBFM
+    if ((w & 0x1f800000) == 0x13800000) { *rd = SPIN_REG(n) | SPIN_REG(m); *wr = SPIN_REG(d); return 1; }   // EXTR
+    if ((w & 0x1f000000) == 0x10000000) { *wr = SPIN_REG(d); return 1; }   // ADR / ADRP
+    if ((w & 0x1f000000) == 0x0a000000) { int s = ((w >> 29) & 3) == 3; *rd = SPIN_REG(n) | SPIN_REG(m); *wr = SPIN_REG(d) | (s ? SPIN_FLAGS : 0); return 1; }   // logical (shifted register)
+    if ((w & 0x1f200000) == 0x0b000000) { int s = (w >> 29) & 1; *rd = SPIN_REG(n) | SPIN_REG(m); *wr = SPIN_REG(d) | (s ? SPIN_FLAGS : 0); return 1; }   // ADD / SUB (shifted register)
+    if ((w & 0x1f200000) == 0x0b200000) {   // ADD / SUB (extended register)
+        int s = (w >> 29) & 1; if (!s && d == 31) return 0;
+        *rd = SPIN_REG(n) | SPIN_REG(m); *wr = SPIN_REG(d) | (s ? SPIN_FLAGS : 0); return 1;
+    }
+    if ((w & 0x1fe0fc00) == 0x1a000000) { *rd = SPIN_REG(n) | SPIN_REG(m) | SPIN_FLAGS; *wr = SPIN_REG(d) | (((w >> 29) & 1) ? SPIN_FLAGS : 0); return 1; }   // ADC / SBC
+    if ((w & 0x3fe00410) == 0x3a400000) { *rd = SPIN_REG(n) | (((w >> 11) & 1) ? 0 : SPIN_REG(m)) | SPIN_FLAGS; *wr = SPIN_FLAGS; return 1; }   // CCMN / CCMP
+    if ((w & 0x3fe00800) == 0x1a800000) { *rd = SPIN_REG(n) | SPIN_REG(m) | SPIN_FLAGS; *wr = SPIN_REG(d); return 1; }   // CSEL / CSINC / CSINV / CSNEG
+    if ((w & 0x7fe00000) == 0x1ac00000 || (w & 0x7fe00000) == 0x5ac00000) { *rd = SPIN_REG(n) | SPIN_REG(m); *wr = SPIN_REG(d); return 1; }   // data processing (2 and 1 source)
+    if ((w & 0x1f000000) == 0x1b000000) { *rd = SPIN_REG(n) | SPIN_REG(m) | SPIN_REG(a); *wr = SPIN_REG(d); return 1; }   // data processing (3 source)
+    return 0;
+}
+/* Is code[head..tail] (tail the back edge to head) a spin wait? Straight line: every other branch leaves the loop. */
+static int spin_loop_pure(const uint32_t *code, uint64_t head, uint64_t tail) {
+    uint64_t live = 0, written = 0;
+    for (uint64_t i = head; i <= tail; i++) {
+        uint64_t rd, wr; int br; int64_t off;
+        if (!spin_insn(code[i], &rd, &wr, &br, &off)) return 0;
+        live |= rd & ~written; written |= wr;
+        if (!br) continue;
+        int64_t to = (int64_t)i + off / 4;
+        if (i == tail) { if (to != (int64_t)head) return 0; }
+        else if (br == 2 || (to >= (int64_t)head && to <= (int64_t)tail)) return 0;
+    }
+    return !(written & live);
+}
+static int spin_range_cmp(const void *x, const void *y) {
+    uint64_t a = ((const spin_range_t *)x)->lo, b = ((const spin_range_t *)y)->lo; return a < b ? -1 : a > b;
+}
+static void spin_gate_scan(void) {   // once, holding G, not in a signal handler
+    size_t cap = 256, count = 0; spin_range_t *r = malloc(cap * sizeof *r);
+    if (!r) { g_spin_gate = 0; return; }
+    char summary[256] = ""; size_t used = 0;
+    const uint8_t *base; uint64_t text_end; const char *name;
+    for (unsigned i = 0; runtime_module_text(i, &base, &text_end, &name); i++) {
+        if (!base || !text_end) continue;
+        const uint32_t *code = (const uint32_t *)base; uint64_t words = text_end / 4; size_t before = count;
+        for (uint64_t t = 1; t < words; t++) {
+            uint64_t rd, wr; int br; int64_t off;
+            uint32_t w = code[t];
+            if (!((w & 0xff000010) == 0x54000000 || (w & 0x7c000000) == 0x34000000 || (w & 0xfc000000) == 0x14000000)) continue;
+            if (!spin_insn(w, &rd, &wr, &br, &off) || off > 0 || off < -4 * (SPIN_LOOP_MAX - 1)) continue;
+            uint64_t h = t + off / 4;
+            if (!spin_loop_pure(code, h, t)) continue;
+            if (count == cap) { spin_range_t *g = realloc(r, (cap *= 2) * sizeof *r); if (!g) break; r = g; }
+            r[count++] = (spin_range_t){(uintptr_t)base + h * 4, (uintptr_t)base + t * 4};
+        }
+        if (count > before && used < sizeof summary)
+            used += (size_t)snprintf(summary + used, sizeof summary - used, "%s%zu in %s", used ? ", " : "", count - before, name);
+    }
+    qsort(r, count, sizeof *r, spin_range_cmp);
+    size_t k = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (k && r[i].lo <= r[k - 1].hi + 4) { if (r[i].hi > r[k - 1].hi) r[k - 1].hi = r[i].hi; }
+        else r[k++] = r[i];
+    }
+    g_spin_ranges = r; __atomic_store_n(&g_spin_nranges, (unsigned)k, __ATOMIC_RELEASE);
+    fprintf(stderr, "[threads] spin gate: %zu spin-wait loops (%s); an owner polling one for %llu us gives its core to "
+            "waiting threads (TOTK_SPIN_GATE=<us>, 0: off)\n", count, used ? summary : "none", (unsigned long long)(g_spin_gate_ns / 1000));
+}
+static int spin_gate_on(void) {   // holding G
+    if (g_spin_gate < 0) {
+        const char *e = getenv("TOTK_SPIN_GATE"); long long us = e && *e ? atoll(e) : 2000;
+        g_spin_gate = us > 0; g_spin_gate_ns = (uint64_t)(us > 0 ? us : 0) * 1000;
+        if (g_spin_gate) spin_gate_scan();
+        else fprintf(stderr, "[threads] spin gate: off (TOTK_SPIN_GATE=0)\n");
+    }
+    return g_spin_gate;
+}
+static int spin_gate_pc(uint64_t pc) {   // signal-safe: the table is written once, before the count is published
+    unsigned lo = 0, hi = __atomic_load_n(&g_spin_nranges, __ATOMIC_ACQUIRE);
+    while (lo < hi) { unsigned mid = (lo + hi) / 2; if (pc < g_spin_ranges[mid].lo) hi = mid; else if (pc > g_spin_ranges[mid].hi) lo = mid + 1; else return 1; }
+    return 0;
+}
+static void core_take(thr_t *t);
+/* Holding G, in preempt_signal: t has polled a spin wait for the gate time. When a waiter may use its core, give it up and
+   queue again behind the waiters for a back-off. Returns whether it did. */
+static int spin_gate_give(thr_t *t) {
+    uint64_t now = now_ns(); int c = t->cur_core, any = 0;
+    for (const thr_t *w = g_core_wait; w && !any; w = w->cnext) any = core_allowed(w, c) && now >= w->gate_until;
+    if (!any) return 0;
+    t->gate_backoff = !t->gate_backoff ? SPIN_BACKOFF_MIN : t->gate_backoff * 2 > SPIN_BACKOFF_MAX ? SPIN_BACKOFF_MAX : t->gate_backoff * 2;
+    t->gate_until = now + t->gate_backoff; t->spin_since = 0; g_spin_gates++;
+    core_put(t); core_take(t);
+    return 1;
 }
 static void preempt_signal(int sig, siginfo_t *si, void *context);
 static int async_preempt_on(void) {   // holding G
@@ -278,13 +434,26 @@ static int async_preempt_on(void) {   // holding G
     }
     return g_async_preempt;
 }
-static int core_kick(thr_t *t) {   // holding G, t waiting: mark (and signal) the owners t may preempt; returns how many
+/* Holding G, t waiting: mark (and signal) the owners t may preempt; ask the others whether they poll a spin wait (spin
+   gate). Returns how many owners it signalled. */
+static int core_kick(thr_t *t) {
     int n = 0; uint64_t now = now_ns();
+    static uint64_t logged_ns, logged_gates;
+    if (g_spin_gates != logged_gates && now - logged_ns >= 30000000000ull) {
+        if (logged_ns) fprintf(stderr, "[threads] spin gate: %llu cores given up from spin waits in %.0f s (%llu signals in all)\n",
+                               (unsigned long long)(g_spin_gates - logged_gates), (now - logged_ns) / 1e9, (unsigned long long)g_spin_kicks);
+        logged_ns = now; logged_gates = g_spin_gates;
+    }
     for (int i = 0; i < NCORE; i++) {
         thr_t *o = g_core_owner[i];
-        if (!o || !core_allowed(t, i) || !core_beats(t, o, now)) continue;
-        __atomic_store_n(&o->preempt, 1, __ATOMIC_RELEASE); n++;
-        if (async_preempt_on() && !pthread_kill(o->pt, SIGUSR2)) g_preempt_kicks++;
+        if (!o || !core_allowed(t, i)) continue;
+        if (core_beats(t, o, now)) {
+            __atomic_store_n(&o->preempt, 1, __ATOMIC_RELEASE); n++;
+            if (async_preempt_on() && !pthread_kill(o->pt, SIGUSR2)) g_preempt_kicks++;
+        } else if (async_preempt_on() && spin_gate_on() && now - o->core_since >= g_spin_gate_ns / 2 && now - o->spin_kick_ns >= SPIN_KICK_NS) {
+            o->spin_kick_ns = now; __atomic_store_n(&o->spin_kick, 1, __ATOMIC_RELEASE); n++;
+            if (!pthread_kill(o->pt, SIGUSR2)) g_spin_kicks++;
+        }
     }
     return n;
 }
@@ -342,7 +511,9 @@ static void core_take(thr_t *t) {   // holding G; waits until a core in t's mask
     if (!t->cqueued) { t->cseq = ++g_wseq; t->cnext = g_core_wait; g_core_wait = t; t->cqueued = 1; t->cwait_ns = now_ns(); }
     int reported = 0;
     while (t->cur_core < 0) {   // kicked owners are signalled again every millisecond; otherwise look again every 20 ms (starvation, inheritance)
-        struct timespec again = {0, core_kick(t) ? 1000000 : 20000000};
+        long ns = core_kick(t) ? 1000000 : 20000000; uint64_t now = now_ns();
+        if (t->gate_until > now && t->gate_until - now < (uint64_t)ns) ns = (long)(t->gate_until - now) + 1000;   // spin gate: may preempt again then
+        struct timespec again = {0, ns};
         pthread_cond_timedwait_relative_np(&t->cv, &G, &again);
         if (!reported && t->cur_core < 0 && t->cwait_ns && now_ns() - t->cwait_ns >= STARVE_NS) { core_wait_report(t); reported = 1; }
     }
@@ -361,14 +532,22 @@ int runtime_guest_code_pc(uint64_t pc);              // loader.c
 static void preempt_signal(int sig, siginfo_t *si, void *context) {
     (void)sig; (void)si;
     thr_t *t = me_or_null();
-    if (!t || !__atomic_load_n(&t->preempt, __ATOMIC_ACQUIRE) || t->cur_core < 0) return;
+    if (!t || t->cur_core < 0) return;
+    int pre = __atomic_load_n(&t->preempt, __ATOMIC_ACQUIRE), spin = __atomic_exchange_n(&t->spin_kick, 0, __ATOMIC_ACQ_REL);
+    if (!pre && !spin) return;
     uint64_t pc = (uint64_t)((ucontext_t *)context)->uc_mcontext->__ss.__pc;
     uintptr_t tp; __asm__ volatile("mrs %0, tpidrro_el0" : "=r"(tp));
     if (!runtime_hle_tsd_off || !*(volatile uintptr_t *)(tp + runtime_hle_tsd_off) || !runtime_guest_code_pc(pc)) return;
+    int gate = 0;
+    if (spin) {   // spin gate: without G, is it polling a spin wait, and since when (the first signal that found it there)?
+        if (!spin_gate_pc(pc)) { t->spin_since = 0; t->gate_backoff = 0; }
+        else { uint64_t now = now_ns(); if (!t->spin_since) t->spin_since = now; else gate = now - t->spin_since >= g_spin_gate_ns; }
+        if (!pre && !gate) return;
+    }
     int saved = errno;
     pthread_mutex_lock(&G);
     if (t->cur_core >= 0 && core_should_yield(t)) { core_put(t); core_take(t); g_preempt_async++; }
-    else t->preempt = 0;
+    else if (!(gate && t->cur_core >= 0 && spin_gate_give(t)) && pre) t->preempt = 0;
     pthread_mutex_unlock(&G);
     errno = saved;
 }
@@ -391,6 +570,7 @@ void runtime_core_checkpoint(void) {
     /* Breath of the Wild (botw.md): the preempt flag is set when a waiter queues up, but a waiter's mask or priority can
        change while it waits; so at every SVC a core owner also looks at the queue itself (core_should_yield: Horizon's
        rule, see core_beats). */
+    if (t) { t->spin_since = 0; t->gate_backoff = 0; }   // spin gate: an SVC ends a spin wait
     if (!t || t->cur_core < 0 || (!t->preempt && !__atomic_load_n(&g_core_wait, __ATOMIC_RELAXED))) return;
     pthread_mutex_lock(&G);
     if (t->cur_core >= 0 && core_should_yield(t)) { core_put(t); core_take(t); }
@@ -1032,8 +1212,9 @@ static void dump_threads(unsigned secs) {
                                             g_core_owner[c] ? (now_ns() - g_core_owner[c]->core_since) / 1e6 : 0.0);
     for (thr_t *w = g_core_wait; w; w = w->cnext) fprintf(stderr, "[totk-dump] core waiter %#x prio %d mask %#llx ideal %d\n", w->handle, w->prio, (unsigned long long)w->mask, w->core);
 #ifdef GAME_BOTW
-    fprintf(stderr, "[totk-dump] preemption signals %llu, cores given up in the signal handler %llu, starvation grants %llu\n",
-            (unsigned long long)g_preempt_kicks, (unsigned long long)g_preempt_async, (unsigned long long)g_starve_grants);
+    fprintf(stderr, "[totk-dump] preemption signals %llu, cores given up in the signal handler %llu, starvation grants %llu; spin gate: %llu signals, %llu cores given up from a spin wait\n",
+            (unsigned long long)g_preempt_kicks, (unsigned long long)g_preempt_async, (unsigned long long)g_starve_grants,
+            (unsigned long long)g_spin_kicks, (unsigned long long)g_spin_gates);
     for (thr_t *w = g_core_wait; w; w = w->cnext) if (eff_prio(w) != w->prio) fprintf(stderr, "[totk-dump] core waiter %#x runs at %d (owns a mutex a better thread waits for)\n", w->handle, eff_prio(w));
 #endif
     thr_t *run[64]; int nrun = 0;

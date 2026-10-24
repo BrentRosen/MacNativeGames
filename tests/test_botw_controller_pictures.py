@@ -51,6 +51,31 @@ def layout_fixture():
 
 
 class BotwControllerPictures(unittest.TestCase):
+    def test_action_prompts_replace_pixels_preserving_headers_padding_and_other_textures(self):
+        source=bytearray(4096);source[:8]=b'BNTX\0\0\0\0'
+        names=[f'Nt_KeyTex{key}_00^d' for key in art.ACTION_ICONS]+['Unrelated']
+        struct.pack_into('<IQ',source,36,len(names),128);regions=[]
+        icons={cp:Image.new('L',(32,40),40+i*30) for i,cp in enumerate(art.ACTION_ICONS.values())}
+        for i,name in enumerate(names):
+            at=256+160*i;struct.pack_into('<Q',source,128+8*i,at);source[at:at+4]=b'BRTI'
+            struct.pack_into('<I',source,at+28,0x201);struct.pack_into('<5I',source,at+36,48,48,1,1,2)
+            struct.pack_into('<I',source,at+80,4096)
+            n=1600+i*40;struct.pack_into('<Q',source,at+96,n);source[n+2:n+3+len(name)]=name.encode()+b'\0'
+            ptr=2000+i*8;struct.pack_into('<Q',source,at+112,ptr);struct.pack_into('<Q',source,ptr,len(source))
+            regions.append(len(source));source.extend(b'\xa5'*4096)
+        out=art.replace_action_textures(bytes(source),icons)
+        self.assertEqual(len(out),len(source));self.assertEqual(out[:4096],source[:4096])
+        for i,start in enumerate(regions[:-1]):
+            positions={art.block_offset(x,y,48,2) for y in range(48) for x in range(48)}
+            for off in range(4096):
+                if off not in positions:self.assertEqual(out[start+off],source[start+off])
+            self.assertEqual(out[start+art.block_offset(24,24,48,2)],40+i*30)
+            self.assertEqual(out[start],0)
+        self.assertEqual(out[regions[-1]:],source[regions[-1]:])
+        struct.pack_into('<I',source,256+28,0x901)
+        with self.assertRaisesRegex(AssertionError,'unexpected action icon format'):
+            art.replace_action_textures(bytes(source),icons)
+
     def test_yaz0_matches_roundtrip_and_compresses_repeated_content(self):
         header=b'Yaz0'+bytes(4)+b'align123'
         for b in (b'a',b'abcd'*1500,bytes(range(256))*32,b'abcabcXabcabcY'*350):
