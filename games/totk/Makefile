@@ -156,14 +156,6 @@ build/system-event-probe: tests/system_event_bind/probe.c runtime/threads.c runt
 
 probe-system-event: build/system-event-probe
 	build/system-event-probe | tee analysis/system-event-probe.log
-# CPU only, against the real threads.c: the loops Breath of the Wild's spin gate takes for spin waits (tests/spin_gate/probe.c)
-.PHONY: probe-spin-gate
-build/spin-gate-probe: tests/spin_gate/probe.c runtime/threads.c runtime/thread_enter.S
-	@mkdir -p build
-	xcrun clang -std=c11 -O1 -g -Wall -Wextra -Werror -DGAME_BOTW=1 -Ithird_party/d2r_gfx/gfx/nvn/include tests/spin_gate/probe.c runtime/thread_enter.S -o "$@"
-probe-spin-gate: build/spin-gate-probe
-	build/spin-gate-probe
-	TOTK_SPIN_GATE=0 build/spin-gate-probe
 
 .PHONY: probe-account probe-gfx
 probe-account:

@@ -353,54 +353,6 @@ the forest and no Game Over. GPU allocation: 1138 MB at frame 300, 1823 MB at ab
 the warm-up this is about 4 MB/min, against 10 MB/min before the fix. Resident memory: 2686 to 2900 MB. A first
 moving try on the field route is void, because Link died before 245 s and the run stayed on Game Over.
 
-## Spin-wait gate (issue #480, 2026-10-23)
-
-Issue #480 (M3 Pro, a card image base, an empty shader cache) reports frames of 100 ms to 1.4 s about once a second in
-the open world, with the GPU and the submit time low. Its log names priority-44 threads holding all three virtual cores
-in one small loop at `main+0xef6368` (called from `main+0xef6318`), while priority-47 / 48 threads wait 100 ms or more
-for a core. The loop is a test-and-test-and-set spin lock (`main+0xef635c`: `ldr`, `cmp`, `b.eq`; then `ldaxr`, `cbz`,
-`clrex`, `b`; again at `main+0xef63f0`), and its critical section is about 20 instructions with no call
-(`0xef6380`-`0xef63c4`). A holder that loses its core inside them waits for a core, and Horizon's rule never lets it
-preempt the better threads that spin for its lock. The asynchronous preemption signals only owners a waiter beats.
-
-The fix follows nxnative's spin waits (described in the issue; their `dm/tools/patch_nso.py` and
-`dm/host/hle_thread.c`), in `threads.c`, without a change to the rewrite:
-
-- At the first core wait, every module's code (as it runs, after the game patches) is scanned for spin waits: a
-  backward branch of at most 16 instructions whose body only loads (no writeback), computes, compares and branches out
-  (no store, call, SVC, system register or SIMD), and writes no register its own pass reads before writing. 1.9.0:
-  1,843 in `main`, 21 in `subsdk0`, 42 in `sdk`. The two loops above are among them, and the critical section is not.
-  Most of the others are compare-and-swap retries, which also end only when another thread stops writing.
-- A waiter that may not preempt an owner that has held its core 1 ms signals it, at most once a millisecond per owner.
-  The handler looks at the interrupted pc without the scheduler lock. An owner found in a spin wait by two signals
-  2 ms apart (`TOTK_SPIN_GATE=<us>`; `0` turns the gate off) gives its core to the waiters and queues again. For a
-  back-off (100 us, doubling to 1 ms while it keeps spinning) it may not preempt and comes after the other waiters. An
-  SVC, or a signal that finds it outside a spin wait, starts the count again.
-- The log names the loop count at the first wait, and every 30 s how many cores were given up. The state dump counts
-  the signals and the gates.
-
-Checks:
-
-- `make probe-spin-gate`: synthetic code. The spin lock, its exclusive retry and a compare-and-swap retry are spin
-  waits. A store, a counter, a list walk, a call, a clock read and a writeback load are not. `TOTK_SPIN_GATE=0` finds
-  none. `make probe-system-event GAME_BOTW=1` and the TOTK build of it still pass.
-- The runtime built from this tree without the change has the same `__text` as the installed app's (built from
-  `3d0a2d5`). With the change, an APFS clone of the app with the same path length ran a copy of the player's save.
-- Hyrule Castle stairs (with Second Wind), 2 minutes each: a 50 s walk, then standing. The order was gate, no gate,
-  gate. The first gate run had the coldest caches.
-
-| Run | FPS (30 s windows) | Longest frame | 300-frame windows with a frame over 50 ms | Core waits over 100 ms |
-|---|---|---|---|---|
-| Gate, first | 104.3-112.3 | 62 ms | 3 of 45 | 0 |
-| No gate | 110.3-114.9 | 109 ms | 2 of 45 | 0 |
-| Gate, warm | 112.7-116.9 | 45 ms | 0 of 46 | 0 |
-
-The gate gave up 3 to 12 cores per 30 s, after 1,100 to 1,700 signals per 30 s. This Mac (M5) did not show the
-one-second frames of #480 without the gate either, so these runs show no cost, not the fix itself.
-
-Installing in place: a signed executable overwritten in place is killed at start (exit 137, the kernel keeps the old
-file's signature). Write the new file next to it and rename it over, then sign the app again.
-
 ## Not tested and known issues
 
 - Sinking legs after a save loads: deferred, cause unknown (see "Long run and the sinking legs").
@@ -419,8 +371,6 @@ file's signature). Write the new file next to it and rename it over, then sign t
 - TOTK: not played on this branch. The evidence is the 68 of 68 preprocessed identity.
 - Upstream's `[dead-keep]` set grows linearly (30k to 397k entries in 25 minutes, from `e0ad452`): not changed here,
   because it is upstream's shared code, and a change to it changes TOTK.
-- Spin-wait gate: the one-second frames of #480 were not reproduced on the test Mac, so the gate is shown to cost
-  nothing, not to remove them.
 - Key 3 native 2K: above 1080p the game fails to make its heaps. It needs a memory patch of its own, and upstream's
   1.6.0 port has none either.
 - Upstream's survey tool (`TOTK_SURVEY`, `f4b3a95`) knows the 1.6.0 player chains only. On 1.9.0 it stops with a

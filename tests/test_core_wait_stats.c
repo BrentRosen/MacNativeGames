@@ -11,7 +11,6 @@ uint64_t runtime_now_ns(void) { atomic_fetch_add(&clock_reads,1); mach_timebase_
 #ifdef GAME_BOTW
 uint64_t runtime_hle_tsd_off;
 int runtime_guest_code_pc(uint64_t pc) { (void)pc; return 0; }
-int runtime_module_text(unsigned i, const uint8_t **base, uint64_t *text_end, const char **name) { (void)i; (void)base; (void)text_end; (void)name; return 0; }   /* loader.c: no modules, no spin waits */
 #endif
 static thr_t owner, waiter;
 static _Atomic int finished;
