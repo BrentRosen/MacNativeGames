@@ -1,5 +1,26 @@
 # MacNativeGames
 
+> [!NOTE]
+> **This is [BrentRosen/MacNativeGames](https://github.com/BrentRosen/MacNativeGames), a fork of [ly05010419/MacNativeGames](https://github.com/ly05010419/MacNativeGames).** Branch `botw-194` is upstream `main` (with the Breath of the Wild 1.9.0 port, #194) plus the changes below. Everything after this box is upstream's README.
+
+## This fork
+
+Breath of the Wild (1.6.0 and 1.9.0) on the Mac:
+
+- **Button icons, chosen in the app.** A **Button icons** menu in the Mac menu bar: Automatic, Switch, Xbox, PlayStation, Keyboard. Automatic waits briefly for a controller at launch and uses its type (upstream's controller detection); no controller selects Keyboard. The font sets are made at build time from your own RomFS. Details: [docs/botw-button-icons.md](docs/botw-button-icons.md).
+- **Matching Controls screen.** Light Xbox and DualSense pictures, or a keyboard picture, with the game's blue outlines and callouts moved to the matching inputs. The texture format is kept, so the Focus artwork is not corrupted. Your own controller artwork can be used in place of the built-in pictures.
+- **Keyboard action buttons.** With Keyboard icons, the fixed HUD action textures (Examine and others) show J K I U Q Opt for A B X Y L ZL.
+- **DLC mods.** Mods for the add-on content load from `mods/<version>-aoc/1/` and `2/`, each with its own manifest (`make_mod_manifest.py --aoc-index`). Merged button-icon sets can be supplied with `TOTK_BUTTON_ICONS` or a `button-icons/` folder. See [docs/mods.md](docs/mods.md#botw-dlc-overlays).
+- **UKMM.** `games/botw/scripts/ukmm.py sync` links a [U-King Mod Manager](https://github.com/GingerAvalanche/ukmm) deploy into the app's mods folders, writes the manifests and fixes the resource size table, so UKMM mods and BNPs work. Steps: [docs/ukmm.md](docs/ukmm.md).
+- **Separate data folders.** An app whose `Info.plist` sets `MNGDataFolder` keeps its saves and settings in its own folder (for example a modded edition with its own profile), and still shares the game slot.
+- **Desktop entry.** `install_desktop_entry.py` also installs Breath of the Wild.
+
+Tears of the Kingdom:
+
+- **Button icons row in the game's Options menu** (System > Options, below "Swap jump controls"), made from your RomFS at build time with no code patch. Details: [docs/controls-option.md](docs/controls-option.md).
+
+Also merged ahead of upstream: [#621](https://github.com/ly05010419/MacNativeGames/pull/621), upstream's fix for the Breath of the Wild 1.9.0 job-queue stutter ([#480](https://github.com/ly05010419/MacNativeGames/issues/480), `TOTK_JQ_YIELD=0` turns it off).
+
 # English
 
 **Breath of the Wild 1.6.0 and 1.9.0 are now officially supported on Mac!** 1.6.0 also runs on the iPhone (first played on an iPhone 14, October 23).
