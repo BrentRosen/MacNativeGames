@@ -6,6 +6,9 @@
 _Noreturn void runtime_fail(const char *s){fprintf(stderr,"failure: %s\n",s);exit(2);}
 void runtime_boot_progress(const char *s,uint64_t a,uint64_t b){(void)s;(void)a;(void)b;}
 void dm_guest_write_prepare(void *p,size_t n){(void)p;(void)n;}
+/* game_data.c: only volume 1, its sizes and hashes unused (the probe opens the image and index itself). */
+uint64_t runtime_game_number(const char *f,const char *k){(void)f;return !strcmp(k,"AOC_PRESENT_MASK");}
+const char *runtime_game_sha256(const char *f,const char *k){(void)f;(void)k;return "";}
 static void contents(const char *path,const char *expected){
  uint64_t h,n;int64_t size;char b[64]={0};assert(!runtime_aoc_open(&h,path,1));assert(!runtime_aoc_size(&size,h));
  assert(size==(int64_t)strlen(expected));assert(!runtime_aoc_read(&n,h,0,b,sizeof b));assert(n==strlen(expected)&&!memcmp(b,expected,n));

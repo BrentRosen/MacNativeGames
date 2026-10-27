@@ -14,7 +14,6 @@ class DlcMods(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
   cls.build=tempfile.TemporaryDirectory();d=Path(cls.build.name);cls.exe=d/'probe'
-  (d/'aoc_config.h').write_text('#define AOC_PRESENT_MASK 1\n'+''.join(f'#define AOC{i}_{key} {value}\n' for i in (1,2) for key,value in [('IMAGE_SIZE','0'),('IMAGE_SHA256','""'),('INDEX_SHA256','""')]))
   p=subprocess.run(['clang','-DGAME_BOTW190','-DGAME_BOTW','-Wno-deprecated-declarations','-I',str(d),'-I',str(ROOT/'games/totk/runtime'),'-I',str(ROOT/'games/totk/third_party/d2r_gfx/gfx/nvn/include'),str(ROOT/'tests/test_aoc_mods.c'),'-framework','CoreFoundation','-o',str(cls.exe)],capture_output=True,text=True)
   if p.returncode:raise RuntimeError(p.stdout+p.stderr)
  @classmethod
